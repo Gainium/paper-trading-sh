@@ -11,14 +11,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - REST API for latest price, exchange info, candles, trades, order management and positions.  
 
 ### Changed  
-_None_
+
 
 ### Fixed  
-_None_
+
 
 ---
 
-<!-- Template for future releases -->
+## [1.0.3] - 2025-06-27
+### Added
+
+### Changed
+- Bumped dependencies versions to fix known vulnerabilities
+
+### Fixed
+- Fixed type errors
+- Removed unused binance-node-api dependency
+
+---
+
 ## [Unreleased]
 ### Added
 -  

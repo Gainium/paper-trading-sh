@@ -53,7 +53,9 @@ class Exchange extends AbstractExchange implements Exchange {
       if (client.isReady) {
         const prices = await client.hGet('allPrice', this.exchange)
         if (prices) {
-          const parse = JSON.parse(prices) as BaseReturn<AllPricesResponse[]>
+          const parse = JSON.parse(`${prices}`) as BaseReturn<
+            AllPricesResponse[]
+          >
           if (parse && parse.data && parse.data.length) {
             if (
               !parse.timeProfile?.exchangeRequestEndTime ||
@@ -151,7 +153,9 @@ class Exchange extends AbstractExchange implements Exchange {
       if (client.isReady) {
         const prices = await client.hGet('allPrice', this.exchange)
         if (prices) {
-          const parse = JSON.parse(prices) as BaseReturn<AllPricesResponse[]>
+          const parse = JSON.parse(`${prices}`) as BaseReturn<
+            AllPricesResponse[]
+          >
           if (parse && parse.data && parse.data.length) {
             if (
               !parse.timeProfile?.exchangeRequestEndTime ||
