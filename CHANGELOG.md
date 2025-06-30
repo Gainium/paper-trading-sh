@@ -30,10 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ---
 
-## [Unreleased]
-### Added
--  
+## [1.0.4] - 2025-06-30
 ### Changed
--  
-### Fixed
--
+- Switched to npm package manager
+- Removed yarn.lock file (no longer needed with npm)
