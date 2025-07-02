@@ -30,6 +30,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ---
 
+## [1.0.5] - 2025-07-02
+### Changed
+- Updated all npm dependencies to latest versions
+
+---
+
 ## [1.0.4] - 2025-06-30
 ### Changed
 - Switched to npm package manager
