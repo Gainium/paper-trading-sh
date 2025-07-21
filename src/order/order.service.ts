@@ -1760,7 +1760,6 @@ export class OrderService implements OnModuleInit {
           )
           const leverage = await this.leverageModel.findOne({
             user: user._id,
-            exchange: order.exchange,
             symbol: order.symbol,
             side: order.positionSide,
           })
