@@ -631,7 +631,7 @@ export class OrderService implements OnModuleInit {
       ExchangeEnum.kucoinLinear,
     ]) {
       const symbols = await this.exchangeService.getAllExchangeInfo(ex)
-      for (const symbol of symbols.data) {
+      for (const symbol of Array.isArray(symbols?.data) ? symbols.data : []) {
         this.symbolsMap.set(`${symbol.pair}`, { data: symbol, time })
       }
     }
