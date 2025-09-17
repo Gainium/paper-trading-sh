@@ -28,6 +28,8 @@ export enum ExchangeEnum {
   bitgetCoinm = 'bitgetCoinm',
   bitgetUsdm = 'bitgetUsdm',
   mexc = 'mexc',
+  hyperliquid = 'hyperliquid',
+  hyperliquidInverse = 'hyperliquidInverse',
 }
 
 export type Ticker = {

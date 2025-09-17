@@ -613,23 +613,7 @@ export class OrderService implements OnModuleInit {
 
   private async addSymbols() {
     const time = +new Date()
-    for (const ex of [
-      ExchangeEnum.binance,
-      ExchangeEnum.bybit,
-      ExchangeEnum.kucoin,
-      ExchangeEnum.bybitUsdm,
-      ExchangeEnum.binanceUsdm,
-      ExchangeEnum.bybitCoinm,
-      ExchangeEnum.binanceCoinm,
-      ExchangeEnum.bitget,
-      ExchangeEnum.bitgetCoinm,
-      ExchangeEnum.binanceUsdm,
-      ExchangeEnum.okx,
-      ExchangeEnum.okxInverse,
-      ExchangeEnum.okxLinear,
-      ExchangeEnum.kucoinInverse,
-      ExchangeEnum.kucoinLinear,
-    ]) {
+    for (const ex of Object.values(ExchangeEnum).filter((v) => isNaN(+v))) {
       const symbols = await this.exchangeService.getAllExchangeInfo(ex)
       for (const symbol of Array.isArray(symbols?.data) ? symbols.data : []) {
         this.symbolsMap.set(`${symbol.pair}`, { data: symbol, time })
