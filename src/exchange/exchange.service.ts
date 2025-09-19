@@ -46,6 +46,7 @@ export class ExchangeService {
           exchange,
         })
         .then((data) => ({
+          code: data.code,
           baseAsset: data.baseAsset,
           quoteAsset: data.quoteAsset,
           maxOrders: data.maxOrders,
@@ -91,6 +92,7 @@ export class ExchangeService {
       })
       .then((data) => {
         return data.map((d) => ({
+          code: d.code,
           baseAsset: d.baseAsset,
           quoteAsset: d.quoteAsset,
           maxOrders: d.maxOrders,

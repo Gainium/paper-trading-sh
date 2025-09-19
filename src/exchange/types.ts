@@ -75,6 +75,7 @@ export type ReturnBad = {
 }
 
 export type ExchangeInfo = {
+  code?: string
   baseAsset: {
     minAmount: number
     maxAmount: number
