@@ -29,7 +29,7 @@ export enum ExchangeEnum {
   bitgetUsdm = 'bitgetUsdm',
   mexc = 'mexc',
   hyperliquid = 'hyperliquid',
-  hyperliquidInverse = 'hyperliquidInverse',
+  hyperliquidLinear = 'hyperliquidLinear',
 }
 
 export type Ticker = {

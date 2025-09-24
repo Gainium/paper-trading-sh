@@ -529,7 +529,7 @@ export class OrderService implements OnModuleInit {
     exchange: ExchangeEnum,
   ) {
     if (
-      ![ExchangeEnum.hyperliquid, ExchangeEnum.hyperliquidInverse].includes(
+      ![ExchangeEnum.hyperliquid, ExchangeEnum.hyperliquidLinear].includes(
         exchange,
       )
     ) {
@@ -544,7 +544,7 @@ export class OrderService implements OnModuleInit {
     exchange: ExchangeEnum,
   ) {
     if (
-      ![ExchangeEnum.hyperliquid, ExchangeEnum.hyperliquidInverse].includes(
+      ![ExchangeEnum.hyperliquid, ExchangeEnum.hyperliquidLinear].includes(
         exchange,
       )
     ) {
