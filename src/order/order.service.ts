@@ -87,6 +87,7 @@ export class OrderService implements OnModuleInit {
   private currentPositions: CurrentPositions = new Map()
   private symbolsMap: Map<string, { data: ExchangeInfo; time: number }> =
     new Map()
+  private codePairMap: Map<string, string> = new Map()
   private newDataLimit = 30 * 1000
   constructor(
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
@@ -523,8 +524,39 @@ export class OrderService implements OnModuleInit {
     }
   }
 
+  private getPairCodeByPairNameAndExchange(
+    pair: string,
+    exchange: ExchangeEnum,
+  ) {
+    if (
+      ![ExchangeEnum.hyperliquid, ExchangeEnum.hyperliquidLinear].includes(
+        exchange,
+      )
+    ) {
+      return pair
+    }
+    const find = this.symbolsMap.get(`${pair}@${exchange}`)
+    return find?.data?.code ?? pair
+  }
+
+  private getPairNameByPairCodeAndExchange(
+    pair: string,
+    exchange: ExchangeEnum,
+  ) {
+    if (
+      ![ExchangeEnum.hyperliquid, ExchangeEnum.hyperliquidLinear].includes(
+        exchange,
+      )
+    ) {
+      return pair
+    }
+    const find = this.codePairMap.get(pair)
+    return find ?? pair
+  }
+
   onModuleInit() {
     ;(async () => {
+      await this.addSymbols()
       const ordersAndPositions = await this.getOpenOrdersAndPositions()
       this.updateBalances(
         ordersAndPositions.orders,
@@ -537,10 +569,6 @@ export class OrderService implements OnModuleInit {
       for (const k of keys) {
         this.redisClient.subscribe(k, this.redisCb)
       }
-    })()
-
-    this.addSymbols()
-    ;(async () => {
       await this.orderModel.syncIndexes()
       await this.positionModel.syncIndexes()
       await this.hedgeModel.syncIndexes()
@@ -613,26 +641,16 @@ export class OrderService implements OnModuleInit {
 
   private async addSymbols() {
     const time = +new Date()
-    for (const ex of [
-      ExchangeEnum.binance,
-      ExchangeEnum.bybit,
-      ExchangeEnum.kucoin,
-      ExchangeEnum.bybitUsdm,
-      ExchangeEnum.binanceUsdm,
-      ExchangeEnum.bybitCoinm,
-      ExchangeEnum.binanceCoinm,
-      ExchangeEnum.bitget,
-      ExchangeEnum.bitgetCoinm,
-      ExchangeEnum.binanceUsdm,
-      ExchangeEnum.okx,
-      ExchangeEnum.okxInverse,
-      ExchangeEnum.okxLinear,
-      ExchangeEnum.kucoinInverse,
-      ExchangeEnum.kucoinLinear,
-    ]) {
+    for (const ex of Object.values(ExchangeEnum).filter((v) => isNaN(+v))) {
       const symbols = await this.exchangeService.getAllExchangeInfo(ex)
       for (const symbol of Array.isArray(symbols?.data) ? symbols.data : []) {
-        this.symbolsMap.set(`${symbol.pair}`, { data: symbol, time })
+        this.symbolsMap.set(`${symbol.pair}@${ex}`, {
+          data: symbol,
+          time,
+        })
+        if (symbol.code) {
+          this.codePairMap.set(symbol.code, symbol.pair)
+        }
       }
     }
   }
@@ -673,6 +691,9 @@ export class OrderService implements OnModuleInit {
           order.exchange,
         )
         this.symbolsMap.set(sym, { data: symbol, time: new Date().getTime() })
+        if (symbol.code) {
+          this.codePairMap.set(symbol.code, order.symbol)
+        }
       }
       const asset =
         order.side === 'BUY'
@@ -705,7 +726,7 @@ export class OrderService implements OnModuleInit {
       ...order.toObject(),
       id: order._id.toString(),
     })
-    const sym = `${order.symbol}@${order.exchange}`
+    const sym = `${this.getPairCodeByPairNameAndExchange(order.symbol, order.exchange)}@${order.exchange}`
     ;(this.watchSymbols.get(sym) ?? new Set()).delete(order.externalId)
     if ((this.watchSymbols.get(sym) ?? new Set()).size === 0) {
       this.watchSymbols.delete(sym)
@@ -727,7 +748,7 @@ export class OrderService implements OnModuleInit {
         })
         .exec())
     for (const p of orders) {
-      const sym = `${p.symbol}@${p.exchange}`
+      const sym = `${this.getPairCodeByPairNameAndExchange(p.symbol, p.exchange)}@${p.exchange}`
       this.watchSymbols.set(
         sym,
         (this.watchSymbols.get(sym) ?? new Set()).add(p.externalId),
@@ -745,7 +766,7 @@ export class OrderService implements OnModuleInit {
         })
         .exec())
     for (const p of positions) {
-      const sym = `${p.symbol}@${p.exchange}`
+      const sym = `${this.getPairCodeByPairNameAndExchange(p.symbol, p.exchange)}@${p.exchange}`
       this.watchSymbols.set(
         sym,
         (this.watchSymbols.get(sym) ?? new Set()).add(p.id),
@@ -1138,7 +1159,7 @@ export class OrderService implements OnModuleInit {
 
   private addPositionToWatchList(position: PositionDocument) {
     this.setPosition(this.mapPositionToDataType(position))
-    const sym = `${position.symbol}@${position.exchange}`
+    const sym = `${this.getPairCodeByPairNameAndExchange(position.symbol, position.exchange)}@${position.exchange}`
     this.checkRedis(sym)
     this.watchSymbols.set(
       sym,
@@ -1281,7 +1302,7 @@ export class OrderService implements OnModuleInit {
           free = old + profit
           current.closePrice = order.price
           this.unLockLeverage(order.user, order.symbol, order.positionSide)
-          const sym = `${order.symbol}@${order.exchange}`
+          const sym = `${this.getPairCodeByPairNameAndExchange(order.symbol, order.exchange)}@${order.exchange}`
           ;(this.watchSymbols.get(sym) ?? new Set()).delete(current.id)
           if ((this.watchSymbols.get(sym) ?? new Set()).size === 0) {
             this.watchSymbols.delete(sym)
@@ -1422,13 +1443,23 @@ export class OrderService implements OnModuleInit {
   }
 
   checkRedis(sym: string) {
-    if (!this.watchSymbols.has(sym)) {
-      this.redisClient?.subscribe(`trade@${sym}`, this.redisCb)
+    const [symbol, exchange] = sym.split('@')
+    const _sym = this.getPairCodeByPairNameAndExchange(
+      symbol,
+      exchange as ExchangeEnum,
+    )
+    if (!this.watchSymbols.has(_sym)) {
+      this.redisClient?.subscribe(`trade@${_sym}`, this.redisCb)
     }
   }
 
   unsubscribeRedis(sym: string) {
-    this.redisClient?.unsubscribe(`trade@${sym}`, this.redisCb)
+    const [symbol, exchange] = sym.split('@')
+    const _sym = this.getPairCodeByPairNameAndExchange(
+      symbol,
+      exchange as ExchangeEnum,
+    )
+    this.redisClient?.unsubscribe(`trade@${_sym}`, this.redisCb)
   }
 
   private async createLimitOrder(order: CreateOrderDto, user: UserDocument) {
@@ -1477,8 +1508,9 @@ export class OrderService implements OnModuleInit {
 
     this.pushPosition(orderInDb)
 
-    const sym = `${order.symbol}@${order.exchange}`
+    let sym = `${order.symbol}@${order.exchange}`
     this.checkRedis(sym)
+    sym = `${this.getPairCodeByPairNameAndExchange(order.symbol, order.exchange)}@${order.exchange}`
     this.watchSymbols.set(
       sym,
       (this.watchSymbols.get(sym) ?? new Set()).add(order.externalId),
@@ -1510,6 +1542,9 @@ export class OrderService implements OnModuleInit {
         position.exchange,
       )
       this.symbolsMap.set(sym, { data: symbol, time: new Date().getTime() })
+      if (symbol.code) {
+        this.codePairMap.set(symbol.code, position.symbol)
+      }
     }
     try {
       const user = await this.userService.getUserByIdOrThrow(
@@ -1588,7 +1623,7 @@ export class OrderService implements OnModuleInit {
     }
     const queries: Promise<any>[] = []
     let symbol: ExchangeInfo
-    const sym = `${order.symbol}@${order.exchange}`
+    let sym = `${order.symbol}@${order.exchange}`
     const getSymbolFromMap = this.symbolsMap.get(sym)
     symbol = getSymbolFromMap?.data
     if (
@@ -1600,6 +1635,9 @@ export class OrderService implements OnModuleInit {
         order.exchange,
       )
       this.symbolsMap.set(sym, { data: symbol, time: new Date().getTime() })
+      if (symbol.code) {
+        this.codePairMap.set(symbol.code, order.symbol)
+      }
     }
     let isFilled = false
     const feePerc = order.feePerc || this.getUserFee('maker', order.exchange)
@@ -1747,6 +1785,7 @@ export class OrderService implements OnModuleInit {
     }
     await Promise.all(queries)
     if (isFilled) {
+      sym = `${this.getPairCodeByPairNameAndExchange(order.symbol, order.exchange)}@${order.exchange}`
       ;(this.watchSymbols.get(sym) ?? new Set()).delete(order.externalId)
       if ((this.watchSymbols.get(sym) ?? new Set()).size === 0) {
         this.watchSymbols.delete(sym)
@@ -1855,7 +1894,7 @@ export class OrderService implements OnModuleInit {
     this.tickerTimeMap.set(exchange, tickerTime)
     const time = +new Date()
     for (const t of tickers) {
-      const sym = `${t.symbol}@${exchange}`
+      const sym = `${this.getPairNameByPairCodeAndExchange(t.symbol, exchange)}@${exchange}`
       if ((this.watchSymbols.get(sym) ?? new Set()).size === 0) {
         continue
       }

@@ -6,6 +6,8 @@ export type SymbolDocument = HydratedDocument<Symbol>
 
 @Schema({ collection: 'pairs' })
 export class Symbol {
+  @Prop()
+  code?: string
   @Prop({ required: true })
   pair: string
 

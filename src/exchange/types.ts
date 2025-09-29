@@ -28,6 +28,8 @@ export enum ExchangeEnum {
   bitgetCoinm = 'bitgetCoinm',
   bitgetUsdm = 'bitgetUsdm',
   mexc = 'mexc',
+  hyperliquid = 'hyperliquid',
+  hyperliquidLinear = 'hyperliquidLinear',
 }
 
 export type Ticker = {
@@ -73,6 +75,7 @@ export type ReturnBad = {
 }
 
 export type ExchangeInfo = {
+  code?: string
   baseAsset: {
     minAmount: number
     maxAmount: number
