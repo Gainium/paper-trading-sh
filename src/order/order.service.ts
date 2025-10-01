@@ -1509,8 +1509,8 @@ export class OrderService implements OnModuleInit {
     this.pushPosition(orderInDb)
 
     let sym = `${order.symbol}@${order.exchange}`
-    this.checkRedis(sym)
     sym = `${this.getPairCodeByPairNameAndExchange(order.symbol, order.exchange)}@${order.exchange}`
+    this.checkRedis(sym)
     this.watchSymbols.set(
       sym,
       (this.watchSymbols.get(sym) ?? new Set()).add(order.externalId),
