@@ -1210,7 +1210,7 @@ export class OrderService implements OnModuleInit {
           (1 + fee * (position === PositionSide.long ? -1 : 1))
         : position === PositionSide.long
           ? fee
-          : 1 / fee)
+          : 2 - fee)
     )
   }
 
