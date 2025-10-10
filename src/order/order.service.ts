@@ -171,6 +171,12 @@ export class OrderService implements OnModuleInit {
           p.user === user._id.toString() &&
           (hedge ? p.positionSide === order.positionSide : true),
       )
+      if (!find && order.reduceOnly) {
+        Logger.warn(
+          `Reduce order is rejected for ${order.externalId}. Position not found ${order.symbol}, user ${user.id}, hedge ${hedge}`,
+        )
+        throw new HttpException('Reduce order is rejected', 400)
+      }
       if (find) {
         if (
           (find.positionSide === PositionSide.long && order.side === 'BUY') ||
@@ -219,12 +225,6 @@ export class OrderService implements OnModuleInit {
       }
       if (notEnough) {
         throw new HttpException('Not enough balance', 400)
-      }
-      if (!find && order.reduceOnly) {
-        Logger.warn(
-          `Reduce order is rejected for ${order.externalId}. Position not found ${order.symbol}, user ${user.id}, hedge ${hedge}`,
-        )
-        throw new HttpException('Reduce order is rejected', 400)
       }
       if (order.type === 'LIMIT') {
         return this.createLimitOrder(order, user)
@@ -1584,17 +1584,14 @@ export class OrderService implements OnModuleInit {
       }
       await this.createOrder(orderData)
     } catch (e) {
-      Logger.error(
-        `Catch error in close future position ${(e as Error)?.message}`,
+      const msg = `${(e as Error)?.message}`
+      Logger.error(`Catch error in close future position ${msg}`)
+      position.status = PositionStatus.closed
+      this.removePosition(position)
+      this.positionModel.updateOne(
+        { uuid: position.uuid },
+        { $set: { status: position.status, updatedAt: new Date() } },
       )
-      if (`${(e as Error)?.message}` === 'User not found') {
-        position.status = PositionStatus.closed
-        this.removePosition(position)
-        this.positionModel.updateOne(
-          { uuid: position.uuid },
-          { $set: { status: position.status, updatedAt: new Date() } },
-        )
-      }
     }
   }
 
