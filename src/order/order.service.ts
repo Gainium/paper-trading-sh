@@ -1443,23 +1443,13 @@ export class OrderService implements OnModuleInit {
   }
 
   checkRedis(sym: string) {
-    const [symbol, exchange] = sym.split('@')
-    const _sym = this.getPairCodeByPairNameAndExchange(
-      symbol,
-      exchange as ExchangeEnum,
-    )
-    if (!this.watchSymbols.has(_sym)) {
-      this.redisClient?.subscribe(`trade@${_sym}`, this.redisCb)
+    if (!this.watchSymbols.has(sym)) {
+      this.redisClient?.subscribe(`trade@${sym}`, this.redisCb)
     }
   }
 
   unsubscribeRedis(sym: string) {
-    const [symbol, exchange] = sym.split('@')
-    const _sym = this.getPairCodeByPairNameAndExchange(
-      symbol,
-      exchange as ExchangeEnum,
-    )
-    this.redisClient?.unsubscribe(`trade@${_sym}`, this.redisCb)
+    this.redisClient?.unsubscribe(`trade@${sym}`, this.redisCb)
   }
 
   private async createLimitOrder(order: CreateOrderDto, user: UserDocument) {
