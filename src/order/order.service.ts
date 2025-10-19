@@ -648,7 +648,7 @@ export class OrderService implements OnModuleInit {
           data: symbol,
           time,
         })
-        if (symbol.code) {
+        if (symbol?.code) {
           this.codePairMap.set(symbol.code, symbol.pair)
         }
       }
@@ -691,7 +691,7 @@ export class OrderService implements OnModuleInit {
           order.exchange,
         )
         this.symbolsMap.set(sym, { data: symbol, time: new Date().getTime() })
-        if (symbol.code) {
+        if (symbol?.code) {
           this.codePairMap.set(symbol.code, order.symbol)
         }
       }
@@ -1532,7 +1532,7 @@ export class OrderService implements OnModuleInit {
         position.exchange,
       )
       this.symbolsMap.set(sym, { data: symbol, time: new Date().getTime() })
-      if (symbol.code) {
+      if (symbol?.code) {
         this.codePairMap.set(symbol.code, position.symbol)
       }
     }
@@ -1622,7 +1622,7 @@ export class OrderService implements OnModuleInit {
         order.exchange,
       )
       this.symbolsMap.set(sym, { data: symbol, time: new Date().getTime() })
-      if (symbol.code) {
+      if (symbol?.code) {
         this.codePairMap.set(symbol.code, order.symbol)
       }
     }
