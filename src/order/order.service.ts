@@ -1881,7 +1881,7 @@ export class OrderService implements OnModuleInit {
     this.tickerTimeMap.set(exchange, tickerTime)
     const time = +new Date()
     for (const t of tickers) {
-      const sym = `${this.getPairNameByPairCodeAndExchange(t.symbol, exchange)}@${exchange}`
+      const sym = `${t.symbol}@${exchange}`
       if ((this.watchSymbols.get(sym) ?? new Set()).size === 0) {
         continue
       }
