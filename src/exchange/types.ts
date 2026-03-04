@@ -32,6 +32,7 @@ export enum ExchangeEnum {
   hyperliquidLinear = 'hyperliquidLinear',
   kraken = 'kraken',
   krakenUsdm = 'krakenUsdm',
+  krakenCoinm = 'krakenCoinm',
 }
 
 export type Ticker = {

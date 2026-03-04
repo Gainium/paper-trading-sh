@@ -55,6 +55,8 @@ export const isFutures = (exchange: ExchangeEnum) => {
     ExchangeEnum.bitgetCoinm,
     ExchangeEnum.bitgetUsdm,
     ExchangeEnum.hyperliquidLinear,
+    ExchangeEnum.krakenUsdm,
+    ExchangeEnum.krakenCoinm,
   ].includes(exchange)
 }
 
@@ -65,5 +67,6 @@ export const isCoinm = (exchange: ExchangeEnum) => {
     ExchangeEnum.okxInverse,
     ExchangeEnum.kucoinInverse,
     ExchangeEnum.bitgetCoinm,
+    ExchangeEnum.krakenCoinm,
   ].includes(exchange)
 }
