@@ -30,6 +30,9 @@ export enum ExchangeEnum {
   mexc = 'mexc',
   hyperliquid = 'hyperliquid',
   hyperliquidLinear = 'hyperliquidLinear',
+  kraken = 'kraken',
+  krakenUsdm = 'krakenUsdm',
+  krakenCoinm = 'krakenCoinm',
 }
 
 export type Ticker = {
