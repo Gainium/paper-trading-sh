@@ -528,7 +528,7 @@ export class OrderService implements OnModuleInit {
     pair: string,
     exchange: ExchangeEnum,
   ) {
-    if (
+    /* if (
       ![ExchangeEnum.hyperliquid, ExchangeEnum.hyperliquidLinear].includes(
         exchange,
       )
@@ -536,7 +536,8 @@ export class OrderService implements OnModuleInit {
       return pair
     }
     const find = this.symbolsMap.get(`${pair}@${exchange}`)
-    return find?.data?.code ?? pair
+    return find?.data?.code ?? pair */
+    return pair
   }
 
   private getPairNameByPairCodeAndExchange(
