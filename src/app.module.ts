@@ -17,7 +17,9 @@ import { HealthModule } from './health/health.module'
       useFactory: async (configService: ConfigService) => {
         const config = configService.getMongoConfig()
         return {
-          uri: `mongodb://${config.username}:${config.password}@${config.host}:${config.port}/${config.name}`,
+          uri:
+            config.connectionsString ??
+            `mongodb://${config.username}:${config.password}@${config.host}:${config.port}/${config.name}`,
         }
       },
       inject: [ConfigService],

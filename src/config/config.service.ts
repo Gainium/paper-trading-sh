@@ -21,6 +21,8 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   MONGO_DB_HOST: string
+
+  MONGO_DB_CONNECTION_STRING?: string
 }
 
 @Injectable()
@@ -33,6 +35,7 @@ export class ConfigService implements OnModuleInit {
 
   getMongoConfig() {
     return {
+      connectionsString: this.env.MONGO_DB_CONNECTION_STRING,
       port: this.env.MONGO_DB_PORT,
       name: this.env.MONGO_DB_NAME,
       password: this.env.MONGO_DB_PASSWORD,
