@@ -643,15 +643,19 @@ export class OrderService implements OnModuleInit {
   private async addSymbols() {
     const time = +new Date()
     for (const ex of Object.values(ExchangeEnum).filter((v) => isNaN(+v))) {
-      const symbols = await this.exchangeService.getAllExchangeInfo(ex)
-      for (const symbol of Array.isArray(symbols?.data) ? symbols.data : []) {
-        this.symbolsMap.set(`${symbol.pair}@${ex}`, {
-          data: symbol,
-          time,
-        })
-        if (symbol?.code) {
-          this.codePairMap.set(symbol.code, symbol.pair)
+      try {
+        const symbols = await this.exchangeService.getAllExchangeInfo(ex)
+        for (const symbol of Array.isArray(symbols?.data) ? symbols.data : []) {
+          this.symbolsMap.set(`${symbol.pair}@${ex}`, {
+            data: symbol,
+            time,
+          })
+          if (symbol?.code) {
+            this.codePairMap.set(symbol.code, symbol.pair)
+          }
         }
+      } catch (e) {
+        Logger.error(`Cannot add symbols for ${ex} ${e}`)
       }
     }
   }
