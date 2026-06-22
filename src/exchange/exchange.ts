@@ -4,6 +4,7 @@ import {
   AllPricesResponse,
   BaseReturn,
   CandleResponse,
+  FundingRateResponse,
   ExchangeEnum,
   ExchangeInfo,
   ExchangeIntervals,
@@ -118,6 +119,38 @@ class Exchange extends AbstractExchange implements Exchange {
     }
     return this.apiCall<BaseReturn<CandleResponse[]>>({
       endpoint: 'candles',
+      method: 'GET',
+      params: {
+        ...params,
+        exchange: this.exchange,
+      },
+    }).catch(this.handleError())
+  }
+
+  async getFundingRateHistory(
+    symbol: string,
+    from?: number,
+    to?: number,
+    limit?: number,
+  ): Promise<BaseReturn<FundingRateResponse[]>> {
+    // Paper deals accrue funding using real rates from exchange-connector.
+    const params: {
+      symbol: string
+      from?: number
+      to?: number
+      limit?: number
+    } = { symbol }
+    if (from) {
+      params.from = from
+    }
+    if (to) {
+      params.to = to
+    }
+    if (limit) {
+      params.limit = limit
+    }
+    return this.apiCall<BaseReturn<FundingRateResponse[]>>({
+      endpoint: 'fundingRateHistory',
       method: 'GET',
       params: {
         ...params,

@@ -2,6 +2,7 @@ import type {
   AllPricesResponse,
   BaseReturn,
   CandleResponse,
+  FundingRateResponse,
   ExchangeInfo,
   TradeResponse,
 } from './types'
@@ -28,6 +29,13 @@ export interface Exchange {
     startTime?: number,
     endTime?: number,
   ): Promise<BaseReturn<TradeResponse[]>>
+
+  getFundingRateHistory(
+    symbol: string,
+    from?: number,
+    to?: number,
+    limit?: number,
+  ): Promise<BaseReturn<FundingRateResponse[]>>
 
   getAllPrices(): Promise<BaseReturn<AllPricesResponse[]>>
 }
@@ -77,6 +85,13 @@ abstract class AbsctractExchange implements Exchange {
     startTime?: number,
     endTime?: number,
   ): Promise<BaseReturn<TradeResponse[]>>
+
+  abstract getFundingRateHistory(
+    symbol: string,
+    from?: number,
+    to?: number,
+    limit?: number,
+  ): Promise<BaseReturn<FundingRateResponse[]>>
 
   /**
    * Get all prices

@@ -117,6 +117,16 @@ export type TradeResponse = {
   timestamp: number
 }
 
+export type FundingRateResponse = {
+  symbol: string
+  /** Settled funding rate as a fraction, e.g. -0.000123 */
+  fundingRate: number
+  /** Settlement time in milliseconds */
+  fundingTime: number
+  /** Mark price associated with the funding charge, when supplied */
+  markPrice?: number
+}
+
 export enum ExchangeIntervals {
   oneM = '1m',
   threeM = '3m',
