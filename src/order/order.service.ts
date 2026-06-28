@@ -1879,11 +1879,13 @@ export class OrderService implements OnModuleInit {
 
   private async processTickers(exchange: ExchangeEnum, tickers: Ticker[]) {
     const tickerData = new Map<string, Tick>()
-    const tickerTime = tickers[0]?.eventTime ?? tickers[0]?.time ?? 0
-    if (tickerTime < (this.tickerTimeMap.get(exchange) ?? 0)) {
-      return
-    }
-    this.tickerTimeMap.set(exchange, tickerTime)
+    // Do NOT gate on a per-exchange "latest tick time" here. processTickers is
+    // invoked once per ticker (see redisCb), so a single exchange-wide clock is
+    // advanced by every symbol on that exchange. A low-frequency symbol (e.g.
+    // ARKUSDT) whose tick arrives with an eventTime slightly behind a busy
+    // symbol's (e.g. BTCUSDT) most recent tick would be dropped wholesale, so
+    // its grid limit orders never matched against price moving through the grid.
+    // Per-symbol ordering is already enforced below via tickerTimeMap.get(sym).
     const time = +new Date()
     for (const t of tickers) {
       const sym = `${t.symbol}@${exchange}`
