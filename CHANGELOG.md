@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file.  
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-06-29
+### Fixed
+- `updateBalances` no longer spams `TypeError ... reading 'quoteAsset'` for orders/positions on delisted or expired symbols: `getExchangeInfo` now throws instead of returning an undefined `data` when a symbol can't be resolved, and the reconciliation loops skip unresolvable instruments quietly.
+### Added
+- Daily orphan sweep (`sweepOrphanPositions`): closes stale `NEW` futures positions (idle >180d) whose symbol no longer resolves — dead instruments that could never close on their own and had accumulated since 2023.
+
 ## [1.3.1] - 2026-06-29
 ### Fixed
 - User gateway: clear stale client ids from subscriber maps on disconnect (no more leaking dead sockets / unbounded map growth)

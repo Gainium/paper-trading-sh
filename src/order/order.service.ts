@@ -11,6 +11,7 @@ import {
 } from '../schema/order.schema'
 import { CreateOrderDto } from './order.controller'
 import { HttpException, Inject, Logger, OnModuleInit } from '@nestjs/common'
+import { Cron, CronExpression } from '@nestjs/schedule'
 import { UserService } from '../user/user.service'
 import { UserDocument } from '../schema/user.schema'
 import { ExchangeService } from '../exchange/exchange.service'
@@ -883,13 +884,17 @@ export class OrderService implements OnModuleInit {
       if (isFutures(o.exchange)) {
         continue
       }
+      let symbol: ExchangeInfo
+      try {
+        symbol = await this.exchangeService.getExchangeInfo(o.symbol, o.exchange)
+      } catch {
+        // Symbol no longer resolvable (delisted spot / expired contract) — the
+        // order references a dead instrument. Skip quietly; not an error.
+        continue
+      }
       try {
         const id = `${o.user.toString()}`
         const userBalances = lockedBalances.get(id) ?? new Map()
-        const symbol = await this.exchangeService.getExchangeInfo(
-          o.symbol,
-          o.exchange,
-        )
         const asset =
           o.side === 'BUY' ? symbol.quoteAsset.name : symbol.baseAsset.name
         const qty =
@@ -904,13 +909,17 @@ export class OrderService implements OnModuleInit {
     }
 
     for (const p of positions) {
+      let symbol: ExchangeInfo
+      try {
+        symbol = await this.exchangeService.getExchangeInfo(p.symbol, p.exchange)
+      } catch {
+        // Symbol no longer resolvable (delisted spot / expired contract) — the
+        // position references a dead instrument. Skip quietly; not an error.
+        continue
+      }
       try {
         const id = `${p.user.toString()}`
         const userBalances = lockedBalances.get(id) ?? new Map()
-        const symbol = await this.exchangeService.getExchangeInfo(
-          p.symbol,
-          p.exchange,
-        )
         const asset = isCoinm(p.exchange)
           ? symbol.baseAsset.name
           : symbol.quoteAsset.name
@@ -960,6 +969,41 @@ export class OrderService implements OnModuleInit {
           })
         }
       }
+    }
+  }
+
+  // A futures position is created NEW on open and only flips CLOSED when a
+  // reducing order fills (needs a live price feed + active deal/bot). Delisted
+  // symbols / stopped bots leave positions stuck NEW forever; nothing else
+  // sweeps them, so they accumulate and choke the startup reconciliation above.
+  // Daily, close the stale ones whose symbol no longer resolves — idle for
+  // months AND unresolvable means the instrument is dead, so this can never
+  // hit a live position (a transient connector blip only spares dead ones).
+  @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  async sweepOrphanPositions() {
+    const STALE_DAYS = 180
+    const cutoff = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000)
+    const stale = await this.positionModel
+      .find({ status: PositionStatus.new, updatedAt: { $lt: cutoff } })
+      .exec()
+    let closed = 0
+    for (const p of stale) {
+      try {
+        await this.exchangeService.getExchangeInfo(p.symbol, p.exchange)
+        continue // symbol still resolves — leave the position alone
+      } catch {
+        // symbol no longer resolvable — dead instrument, safe to close
+      }
+      await this.positionModel.updateOne(
+        { _id: p._id },
+        { $set: { status: PositionStatus.closed, updatedAt: new Date() } },
+      )
+      closed++
+    }
+    if (closed) {
+      Logger.log(
+        `Orphan sweep: closed ${closed}/${stale.length} stale NEW positions`,
+      )
     }
   }
 

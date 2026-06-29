@@ -76,7 +76,7 @@ export class ExchangeService {
       Logger.warn(`${symbol} not found in DB`)
       symbolData = await this.getExchange(exchange).getExchangeInfo(symbol)
     }
-    if (!symbolData) {
+    if (!symbolData || !symbolData.data) {
       throw new HttpException('Symbol not found', 400)
     }
     return symbolData.data
