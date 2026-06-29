@@ -39,6 +39,21 @@ export class UserGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleDisconnect(@ConnectedSocket() client: Socket) {
     Logger.log(`${client.id} disconnected`)
+    // Drop this socket from both subscriber maps. Without this the maps leak
+    // stale client ids forever: sendOrderToClient/sendBalanceToClient keep
+    // emitting to dead sockets, and the maps grow unbounded across the
+    // websocket-connector's reconnect churn. (user-stream staleness hygiene.)
+    this.removeClientFromMaps(client.id)
+  }
+
+  private removeClientFromMaps(clientId: string) {
+    for (const map of [this.orderClientUsersMap, this.balanceClientUsersMap]) {
+      for (const [userId, clientIds] of map) {
+        if (clientIds.delete(clientId) && clientIds.size === 0) {
+          map.delete(userId)
+        }
+      }
+    }
   }
 
   async sendBalanceToClient(userId: string, data: Record<string, unknown>) {
