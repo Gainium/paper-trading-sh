@@ -886,7 +886,10 @@ export class OrderService implements OnModuleInit {
       }
       let symbol: ExchangeInfo
       try {
-        symbol = await this.exchangeService.getExchangeInfo(o.symbol, o.exchange)
+        symbol = await this.exchangeService.getExchangeInfo(
+          o.symbol,
+          o.exchange,
+        )
       } catch {
         // Symbol no longer resolvable (delisted spot / expired contract) — the
         // order references a dead instrument. Skip quietly; not an error.
@@ -911,7 +914,10 @@ export class OrderService implements OnModuleInit {
     for (const p of positions) {
       let symbol: ExchangeInfo
       try {
-        symbol = await this.exchangeService.getExchangeInfo(p.symbol, p.exchange)
+        symbol = await this.exchangeService.getExchangeInfo(
+          p.symbol,
+          p.exchange,
+        )
       } catch {
         // Symbol no longer resolvable (delisted spot / expired contract) — the
         // position references a dead instrument. Skip quietly; not an error.
