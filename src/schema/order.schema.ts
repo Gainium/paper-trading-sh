@@ -104,5 +104,11 @@ export type OrderDataType = {
 export const OrderSchema = SchemaFactory.createForClass(Order)
 OrderSchema.index({ externalId: 1, symbol: 1 }, { unique: true })
 OrderSchema.index({ user: 1 })
+// Supports closeFuturePosition's liquidation cancel-sweep
+// (`order.service.ts` -> `allSymbolReduceOrders`), which matches on
+// user + symbol + reduceOnly with a $nin on status. Equality keys first,
+// the status range last (ESR): without it the planner falls back to the
+// `user_1` prefix and FETCHes every order the user ever placed.
+OrderSchema.index({ user: 1, symbol: 1, reduceOnly: 1, status: 1 })
 
 export type CurrentOrders = Map<string, Map<string, OrderDataType>>
