@@ -78,6 +78,14 @@ const UpdateOrderMutex = new IdMutex()
 const TickerMutex = new IdMutex()
 const commonMutex = new IdMutex()
 
+// Cancelling an order that is already gone (filled / cancelled / expired) is an
+// EXPECTED outcome of the liquidation sweep, not a failure: closeFuturePosition
+// cancels the user's reduceOnly orders symbol-wide, so concurrent liquidations
+// on the same symbol routinely race for the same order. `processCancelOrder`
+// reports it with this exact message — main-app's `unknownOrderMessages` list
+// matches on that string, so it must not change.
+const alreadyGoneOrderMessages = ['Unknown order']
+
 export class OrderService implements OnModuleInit {
   private redisClient: RedisWrapper | null = null
   private readonly watchSymbols: Map<string, Set<string>> = new Map()
@@ -89,6 +97,8 @@ export class OrderService implements OnModuleInit {
   private symbolsMap: Map<string, { data: ExchangeInfo; time: number }> =
     new Map()
   private codePairMap: Map<string, string> = new Map()
+  // uuids of positions whose liquidation is currently in flight
+  private liquidatingPositions: Set<string> = new Set()
   private newDataLimit = 30 * 1000
   constructor(
     @InjectModel(Order.name) private orderModel: Model<OrderDocument>,
@@ -1611,7 +1621,16 @@ export class OrderService implements OnModuleInit {
           user.secret,
           o.externalId,
           true,
-        ).catch((e) => Logger.error(e))
+        ).catch((e) => {
+          const msg = `${(e as Error)?.message ?? e}`
+          if (alreadyGoneOrderMessages.some((m) => msg.includes(m))) {
+            Logger.debug(
+              `Reduce order ${o.externalId} already gone while liquidating ${position.uuid}: ${msg}`,
+            )
+            return
+          }
+          Logger.error(e)
+        })
       }
 
       const orderData: CreateOrderDto = {
@@ -1900,7 +1919,18 @@ export class OrderService implements OnModuleInit {
         .sort((a, b) => b.liquidationPrice - a.liquidationPrice)
 
       for (const position of [...longPositions, ...shortPositions]) {
-        this.closeFuturePosition(position)
+        // A liquidation spans several awaits (exchange info + cancel sweep +
+        // market order). The position stays NEW in RAM for that whole window,
+        // so without this guard every tick that arrives meanwhile queues
+        // another full pass for the same position on commonMutex and replays
+        // the cancel sweep.
+        if (this.liquidatingPositions.has(position.uuid)) {
+          continue
+        }
+        this.liquidatingPositions.add(position.uuid)
+        this.closeFuturePosition(position).finally(() =>
+          this.liquidatingPositions.delete(position.uuid),
+        )
       }
 
       const filterPositions = positions.filter((p) => p.symbol === symbol)
