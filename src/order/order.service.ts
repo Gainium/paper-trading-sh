@@ -1492,19 +1492,25 @@ export class OrderService implements OnModuleInit {
     if (!data.length) {
       return
     }
-    await this.userService.increaseUserBalance(user, ...data).then(async () => {
-      try {
-        this.userGateway.sendBalanceToClient(
+    const applied = await this.userService.increaseUserBalance(user, ...data)
+    if (!applied) {
+      Logger.error(
+        `Balance update was not fully applied, user - ${user}, updates - ${JSON.stringify(
+          data,
+        )}`,
+      )
+    }
+    try {
+      this.userGateway.sendBalanceToClient(
+        user.toString(),
+        await this.userService.getUserBalanceByUserIdOrThrow(
           user.toString(),
-          await this.userService.getUserBalanceByUserIdOrThrow(
-            user.toString(),
-            data.map((d) => d.asset),
-          ),
-        )
-      } catch (e) {
-        Logger.error(`${e.message}`)
-      }
-    })
+          data.map((d) => d.asset),
+        ),
+      )
+    } catch (e) {
+      Logger.error(`${e.message}`)
+    }
   }
 
   checkRedis(sym: string) {

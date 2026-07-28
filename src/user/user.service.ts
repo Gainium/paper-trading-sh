@@ -1,7 +1,11 @@
 import { InjectModel } from '@nestjs/mongoose'
 import { User, UserDocument } from '../schema/user.schema'
 import mongoose, { Model } from 'mongoose'
-import { Wallet, WalletDocument } from '../schema/wallet.schema'
+import {
+  Wallet,
+  WalletDocument,
+  walletBalanceMin,
+} from '../schema/wallet.schema'
 import { Leverage, LeverageDocument } from '../schema/leverage.schema'
 import {
   PositionInfo,
@@ -245,45 +249,94 @@ export class UserService {
     }
   }
 
+  /**
+   * Returns true when every delta was applied in full.
+   */
   async increaseUserBalance(
     user: mongoose.Schema.Types.ObjectId | mongoose.Types.ObjectId,
     ...updates: { asset: string; free: number; locked: number }[]
-  ): Promise<void> {
-    const queries: Promise<any>[] = []
-    updates.forEach((u) => {
-      queries.push(
-        this.walletModel
-          .findOneAndUpdate(
-            {
-              user: user,
-              asset: u.asset,
-              /*free: {
-                $gte: u.free < 0 ? Math.abs(u.free) - eps : -eps,
-              },
-              locked: {
-                $gte: u.locked < 0 ? Math.abs(u.locked) - eps : -eps,
-              },*/
-            },
-            {
-              user: user,
-              asset: u.asset,
-              $inc: { free: u.free, locked: u.locked },
-            },
-            { upsert: true },
-          )
-          .exec()
-          .catch((e) =>
-            Logger.error(
-              `Failed to update user balance ${
-                e?.message || e
-              }, user - ${user}, asset - ${u.asset}, free - ${
-                u.free
-              }, locked - ${u.locked}`,
-            ),
+  ): Promise<boolean> {
+    const applied = await Promise.all(
+      updates.map((u) => this.applyWalletDelta(user, u)),
+    )
+    return applied.every(Boolean)
+  }
+
+  /**
+   * `paperWallets` carries a server-side validator that refuses free/locked
+   * below `walletBalanceMin`, so an unguarded $inc that over-releases one field
+   * made Mongo reject the WHOLE update — the credit half of the same delta was
+   * lost too and the failure was only logged. Guard the decrement instead:
+   * a conditional $inc in the common case, and a clamped retry when the wallet
+   * genuinely holds less than the caller is trying to remove. The guarded
+   * update never upserts, so a failed precondition can no longer insert a
+   * duplicate wallet doc for the same (user, asset).
+   */
+  private async applyWalletDelta(
+    user: mongoose.Schema.Types.ObjectId | mongoose.Types.ObjectId,
+    u: { asset: string; free: number; locked: number },
+  ): Promise<boolean> {
+    const filter = { user: user, asset: u.asset }
+    if (await this.incWalletGuarded(filter, u.free, u.locked)) {
+      return true
+    }
+    const wallet = await this.walletModel.findOne(filter).exec()
+    if (!wallet) {
+      // First write for this (user, asset): there is nothing to take from, and
+      // the validator refuses to insert a negative balance, so only the credit
+      // side of the delta can land.
+      const free = Math.max(u.free, 0)
+      const locked = Math.max(u.locked, 0)
+      await this.walletModel
+        .updateOne(
+          filter,
+          { ...filter, $inc: { free, locked } },
+          { upsert: true },
+        )
+        .exec()
+        .catch((e) =>
+          Logger.error(
+            `Failed to create user balance ${e?.message || e}, user - ${user}, asset - ${u.asset}, free - ${u.free}, locked - ${u.locked}`,
           ),
-      )
-    })
-    await Promise.all(queries)
+        )
+      return free === u.free && locked === u.locked
+    }
+    const free = Math.max(u.free, -Math.max(wallet.free, 0))
+    const locked = Math.max(u.locked, -Math.max(wallet.locked, 0))
+    const applied = await this.incWalletGuarded(filter, free, locked)
+    Logger.error(
+      `Wallet over-release, user - ${user}, asset - ${u.asset}, requested free - ${u.free}, locked - ${u.locked}, wallet free - ${wallet.free}, locked - ${wallet.locked}, applied free - ${applied ? free : 0}, locked - ${applied ? locked : 0}`,
+    )
+    return false
+  }
+
+  private async incWalletGuarded(
+    filter: {
+      user: mongoose.Schema.Types.ObjectId | mongoose.Types.ObjectId
+      asset: string
+    },
+    free: number,
+    locked: number,
+  ): Promise<boolean> {
+    const guarded: Record<string, unknown> = { ...filter }
+    // The wallet must hold enough to cover a decrement, within the same
+    // tolerance the collection validator allows for rounding dust.
+    if (free < 0) {
+      guarded.free = { $gte: -free + walletBalanceMin / 2 }
+    }
+    if (locked < 0) {
+      guarded.locked = { $gte: -locked + walletBalanceMin / 2 }
+    }
+    const res = await this.walletModel
+      .updateOne(guarded, { $inc: { free, locked } })
+      .exec()
+      .catch((e) => {
+        Logger.error(
+          `Failed to update user balance ${e?.message || e}, user - ${filter.user}, asset - ${filter.asset}, free - ${free}, locked - ${locked}`,
+        )
+        return null
+      })
+    return (res?.matchedCount ?? 0) > 0
   }
 
   async setUserBalance(
