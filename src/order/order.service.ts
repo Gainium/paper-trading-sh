@@ -1141,10 +1141,7 @@ export class OrderService implements OnModuleInit {
         positionSide: order.positionSide,
       }
     }
-    const orderInDb = await this.orderModel.create(orderData)
-    if (isFutures(order.exchange)) {
-      await this.processFuturesPosition(orderInDb, leverage, symbol)
-    } else {
+    if (!isFutures(order.exchange)) {
       const balance: { asset: string; free: number; locked: number }[] = []
       if (order.side === 'SELL') {
         balance.push(
@@ -1173,7 +1170,16 @@ export class OrderService implements OnModuleInit {
           },
         )
       }
-      await this.updateBalance(user.id, ...balance)
+      // Settle before booking the fill: the sold asset is debited first, and if
+      // the wallet cannot cover it the bought asset is never credited, so the
+      // order is rejected rather than filled out of money that isn't there.
+      if (!(await this.updateBalance(user.id, ...balance))) {
+        throw new HttpException('Not enough balance', 400)
+      }
+    }
+    const orderInDb = await this.orderModel.create(orderData)
+    if (isFutures(order.exchange)) {
+      await this.processFuturesPosition(orderInDb, leverage, symbol)
     }
     this.userGateway.sendOrderToClient(
       user.id,
@@ -1485,12 +1491,13 @@ export class OrderService implements OnModuleInit {
     })
   }
 
+  /** Returns false when the wallet could not cover the whole delta set. */
   private async updateBalance(
     user: Schema.Types.ObjectId | Types.ObjectId,
     ...data: { asset: string; free: number; locked: number }[]
-  ) {
+  ): Promise<boolean> {
     if (!data.length) {
-      return
+      return true
     }
     const applied = await this.userService.increaseUserBalance(user, ...data)
     if (!applied) {
@@ -1511,6 +1518,7 @@ export class OrderService implements OnModuleInit {
     } catch (e) {
       Logger.error(`${e.message}`)
     }
+    return applied
   }
 
   checkRedis(sym: string) {

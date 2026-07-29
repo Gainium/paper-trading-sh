@@ -251,15 +251,31 @@ export class UserService {
 
   /**
    * Returns true when every delta was applied in full.
+   *
+   * Debits are applied before credits. `applyWalletDelta` keeps one wallet's
+   * free/locked pair consistent, but a delta set spanning two assets (a spot
+   * fill credits the bought asset and debits the sold one) would still mint
+   * balance if the credit landed while the debit was refused, so nothing is
+   * credited unless every debit stuck.
    */
   async increaseUserBalance(
     user: mongoose.Schema.Types.ObjectId | mongoose.Types.ObjectId,
     ...updates: { asset: string; free: number; locked: number }[]
   ): Promise<boolean> {
-    const applied = await Promise.all(
-      updates.map((u) => this.applyWalletDelta(user, u)),
+    const isDebit = (u: { free: number; locked: number }) =>
+      u.free < 0 || u.locked < 0
+    const debited = await Promise.all(
+      updates.filter(isDebit).map((u) => this.applyWalletDelta(user, u)),
     )
-    return applied.every(Boolean)
+    if (!debited.every(Boolean)) {
+      return false
+    }
+    const credited = await Promise.all(
+      updates
+        .filter((u) => !isDebit(u))
+        .map((u) => this.applyWalletDelta(user, u)),
+    )
+    return credited.every(Boolean)
   }
 
   /**
@@ -271,6 +287,16 @@ export class UserService {
    * genuinely holds less than the caller is trying to remove. The guarded
    * update never upserts, so a failed precondition can no longer insert a
    * duplicate wallet doc for the same (user, asset).
+   *
+   * Clamping `free` and `locked` independently was just as wrong: a clamped
+   * debit paired with a credit that still landed in full raised the wallet's
+   * free+locked total out of nothing, so the paper ledger drifted away from the
+   * open positions it is supposed to back. The two fields of one delta are a
+   * pair, so a shortfall on the debit side is taken back off the credit side —
+   * opening a futures position whose fee the wallet cannot quite cover now locks
+   * that much less margin instead of conjuring the fee. When the credit side
+   * cannot absorb the shortfall (a net debit larger than the wallet) nothing is
+   * applied at all, and either way the caller is told the delta did not land.
    */
   private async applyWalletDelta(
     user: mongoose.Schema.Types.ObjectId | mongoose.Types.ObjectId,
@@ -281,31 +307,43 @@ export class UserService {
       return true
     }
     const wallet = await this.walletModel.findOne(filter).exec()
-    if (!wallet) {
-      // First write for this (user, asset): there is nothing to take from, and
-      // the validator refuses to insert a negative balance, so only the credit
-      // side of the delta can land.
-      const free = Math.max(u.free, 0)
-      const locked = Math.max(u.locked, 0)
-      await this.walletModel
+    if (!wallet && u.free >= 0 && u.locked >= 0) {
+      // First write for this (user, asset): nothing to guard against, the
+      // guarded $inc only missed because the doc does not exist yet.
+      return await this.walletModel
         .updateOne(
           filter,
-          { ...filter, $inc: { free, locked } },
+          { ...filter, $inc: { free: u.free, locked: u.locked } },
           { upsert: true },
         )
         .exec()
-        .catch((e) =>
+        .then(() => true)
+        .catch((e) => {
           Logger.error(
             `Failed to create user balance ${e?.message || e}, user - ${user}, asset - ${u.asset}, free - ${u.free}, locked - ${u.locked}`,
-          ),
-        )
-      return free === u.free && locked === u.locked
+          )
+          return false
+        })
     }
-    const free = Math.max(u.free, -Math.max(wallet.free, 0))
-    const locked = Math.max(u.locked, -Math.max(wallet.locked, 0))
-    const applied = await this.incWalletGuarded(filter, free, locked)
+    // How much of each requested debit the wallet cannot cover.
+    const shortOf = (have: number, delta: number) =>
+      delta < 0 ? Math.max(0, -delta - Math.max(have, 0)) : 0
+    const shortFree = shortOf(wallet?.free ?? 0, u.free)
+    const shortLocked = shortOf(wallet?.locked ?? 0, u.locked)
+    const shortfall = shortFree + shortLocked
+    // Clamp each debit to what is actually there and take the same amount off
+    // the credit side, so the applied pair never nets to more than was asked.
+    const free = u.free > 0 ? u.free - shortfall : u.free + shortFree
+    const locked = u.locked > 0 ? u.locked - shortfall : u.locked + shortLocked
+    const absorbed =
+      shortfall > 0 &&
+      free + locked <= u.free + u.locked - walletBalanceMin &&
+      free >= -Math.max(wallet?.free ?? 0, 0) &&
+      locked >= -Math.max(wallet?.locked ?? 0, 0)
+    const applied =
+      absorbed && (await this.incWalletGuarded(filter, free, locked))
     Logger.error(
-      `Wallet over-release, user - ${user}, asset - ${u.asset}, requested free - ${u.free}, locked - ${u.locked}, wallet free - ${wallet.free}, locked - ${wallet.locked}, applied free - ${applied ? free : 0}, locked - ${applied ? locked : 0}`,
+      `Wallet over-release, user - ${user}, asset - ${u.asset}, requested free - ${u.free}, locked - ${u.locked}, wallet free - ${wallet?.free ?? 0}, locked - ${wallet?.locked ?? 0}, applied free - ${applied ? free : 0}, locked - ${applied ? locked : 0}`,
     )
     return false
   }
