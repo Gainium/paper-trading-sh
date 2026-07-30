@@ -342,9 +342,14 @@ export class UserService {
       locked >= -Math.max(wallet?.locked ?? 0, 0)
     const applied =
       absorbed && (await this.incWalletGuarded(filter, free, locked))
-    Logger.error(
-      `Wallet over-release, user - ${user}, asset - ${u.asset}, requested free - ${u.free}, locked - ${u.locked}, wallet free - ${wallet?.free ?? 0}, locked - ${wallet?.locked ?? 0}, applied free - ${applied ? free : 0}, locked - ${applied ? locked : 0}`,
-    )
+    // Fully absorbed by the clamp = contained, no ledger damage: log it as a
+    // warning so it stops paging. Only an unabsorbed delta is an error.
+    const message = `Wallet over-release, user - ${user}, asset - ${u.asset}, requested free - ${u.free}, locked - ${u.locked}, wallet free - ${wallet?.free ?? 0}, locked - ${wallet?.locked ?? 0}, applied free - ${applied ? free : 0}, locked - ${applied ? locked : 0}`
+    if (applied) {
+      Logger.warn(message)
+    } else {
+      Logger.error(message)
+    }
     return false
   }
 

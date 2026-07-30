@@ -1452,7 +1452,19 @@ export class OrderService implements OnModuleInit {
             this.addPositionToWatchList(position)
           }
         } else {
-          current.margin -= margin
+          // Release the margin that was actually LOCKED for these units, i.e.
+          // priced at the position's entry price — the same way `diffMargin`
+          // is derived in the flip branch above. Pricing the release at the
+          // closing order's price instead makes both `current.margin` and the
+          // wallet's `locked` drift by the trade's gross PnL on every partial
+          // close, which over time drives margin negative and locked to 0, and
+          // then every further release trips the wallet over-release guard.
+          const closedMargin = isCoinm(order.exchange)
+            ? (order.amount * symbol.quoteAsset.minAmount) /
+              current.entryPrice /
+              leverage
+            : (order.amount * current.entryPrice) / leverage
+          current.margin -= closedMargin
           current.positionAmt -= order.amount
           const profit = isCoinm(order.exchange)
             ? ((order.amount * symbol.quoteAsset.minAmount) /
@@ -1465,8 +1477,8 @@ export class OrderService implements OnModuleInit {
               order.fee
           current.profit += profit
           current.fee += order.fee
-          locked = -margin
-          free = margin + profit
+          locked = -closedMargin
+          free = closedMargin + profit
         }
       }
       if (current.status === PositionStatus.closed) {
