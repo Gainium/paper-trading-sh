@@ -118,7 +118,14 @@ export class OrderService implements OnModuleInit {
     (order: CreateOrderDto) =>
       `${order.key}${order.secret}${order.symbol}${order.exchange}`,
   )
-  async createOrder(order: CreateOrderDto): Promise<CreateOrderResponse> {
+  async createOrder(
+    order: CreateOrderDto,
+    // Internal only (not part of the mirrored exchange-connector HTTP contract):
+    // the uuid of the position this order is meant to act on. Set by
+    // closeFuturePosition so a liquidation closes the position that was actually
+    // liquidated instead of whichever same-side position the lookup finds first.
+    targetPositionUuid?: string,
+  ): Promise<CreateOrderResponse> {
     const user = await this.userService.getUserByKeyAndSecretOrThrow(
       order.key,
       order.secret,
@@ -240,7 +247,7 @@ export class OrderService implements OnModuleInit {
       if (order.type === 'LIMIT') {
         return this.createLimitOrder(order, user)
       }
-      return this.processMarketOrder(order, user, leverage)
+      return this.processMarketOrder(order, user, leverage, targetPositionUuid)
     }
     if (
       order.type === 'MARKET' ||
@@ -266,7 +273,7 @@ export class OrderService implements OnModuleInit {
         )
         throw new HttpException('Not enough balance', 400)
       }
-      return this.processMarketOrder(order, user, leverage)
+      return this.processMarketOrder(order, user, leverage, targetPositionUuid)
     } else {
       if (
         order.side === 'BUY' &&
@@ -1072,6 +1079,8 @@ export class OrderService implements OnModuleInit {
     order: CreateOrderDto,
     user: UserDocument,
     leverage: number,
+    // Forwarded from createOrder — see the comment there.
+    targetPositionUuid?: string,
   ) {
     const currentPrice = await this.getLatestPriceInExchange(
       order.symbol,
@@ -1179,7 +1188,12 @@ export class OrderService implements OnModuleInit {
     }
     const orderInDb = await this.orderModel.create(orderData)
     if (isFutures(order.exchange)) {
-      await this.processFuturesPosition(orderInDb, leverage, symbol)
+      await this.processFuturesPosition(
+        orderInDb,
+        leverage,
+        symbol,
+        targetPositionUuid,
+      )
     }
     this.userGateway.sendOrderToClient(
       user.id,
@@ -1289,6 +1303,9 @@ export class OrderService implements OnModuleInit {
     order: Omit<OrderDataType, 'id'> & { id?: string },
     leverage: number,
     symbol: ExchangeInfo,
+    // See createOrder: when the caller already knows which position it is acting
+    // on, match that one by uuid rather than re-deriving it from (user, side).
+    targetPositionUuid?: string,
   ) {
     const hedge =
       (await this.hedgeModel
@@ -1297,12 +1314,29 @@ export class OrderService implements OnModuleInit {
           user: order.user._id.toString(),
         })
         .then((res) => res?.hedge)) ?? false
-    const current = this.getPositionsBySymbols([order.symbol]).find(
-      (p) =>
-        //@ts-ignore
-        p.user === order.user._id.toString() &&
-        (hedge ? p.positionSide === order.positionSide : true),
-    )
+    // A (user, positionSide) lookup is ambiguous whenever the same user holds
+    // more than one position on the symbol for that side — which does happen (a
+    // flip splits one into two at the `diff <= 0` branch below). Liquidations are
+    // fired per position and run concurrently, so without the uuid every sibling
+    // resolves to whichever position sits first in the Map: one closes, the rest
+    // keep status NEW with positionAmt untouched and are re-liquidated on every
+    // subsequent tick, indefinitely.
+    const current = targetPositionUuid
+      ? this.getPositionsBySymbols([order.symbol]).find(
+          (p) => p.uuid === targetPositionUuid,
+        )
+      : this.getPositionsBySymbols([order.symbol]).find(
+          (p) =>
+            //@ts-ignore
+            p.user === order.user._id.toString() &&
+            (hedge ? p.positionSide === order.positionSide : true),
+        )
+    // The caller named a position and it is already gone from the book: it was
+    // closed while this order was in flight. Falling through would take the
+    // `!current` branch and OPEN a brand-new position out of a reduceOnly close.
+    if (targetPositionUuid && !current) {
+      return
+    }
     const margin = isCoinm(order.exchange)
       ? (order.amount * symbol.quoteAsset.minAmount) / order.price / leverage
       : (order.amount * order.price) / leverage
@@ -1672,7 +1706,7 @@ export class OrderService implements OnModuleInit {
         secret: user.secret,
         externalId: `liquidation_${v4()}`,
       }
-      await this.createOrder(orderData)
+      await this.createOrder(orderData, position.uuid)
     } catch (e) {
       const msg = `${(e as Error)?.message}`
       Logger.error(`Catch error in close future position ${msg}`)

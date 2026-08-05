@@ -2,6 +2,10 @@
 All notable changes to this project will be documented in this file.  
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-08-05
+### Fixed
+- Paper futures: a liquidation now closes the position that was actually liquidated. The close re-derived its target from `(user, positionSide)`, so when a user held several same-side positions on one symbol every liquidation resolved to whichever came first — one closed, the rest stayed `NEW` with an untouched `positionAmt` and were re-liquidated on every following tick without end.
+
 ## [1.3.2] - 2026-06-29
 ### Fixed
 - `updateBalances` no longer spams `TypeError ... reading 'quoteAsset'` for orders/positions on delisted or expired symbols: `getExchangeInfo` now throws instead of returning an undefined `data` when a symbol can't be resolved, and the reconciliation loops skip unresolvable instruments quietly.
