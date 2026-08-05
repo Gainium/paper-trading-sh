@@ -1545,8 +1545,17 @@ export class OrderService implements OnModuleInit {
     if (!data.length) {
       return true
     }
-    const applied = await this.userService.increaseUserBalance(user, ...data)
-    if (!applied) {
+    const result = await this.userService.increaseUserBalance(user, ...data)
+    if (result === 'contained') {
+      // The delta asked to release more than the wallet held; the clamp took
+      // the excess off the credit side and the corrected write landed, so the
+      // wallet is still consistent. Nothing to page an operator about.
+      Logger.warn(
+        `Balance update was clamped to the wallet, user - ${user}, updates - ${JSON.stringify(
+          data,
+        )}`,
+      )
+    } else if (result === 'failed') {
       Logger.error(
         `Balance update was not fully applied, user - ${user}, updates - ${JSON.stringify(
           data,
@@ -1564,7 +1573,7 @@ export class OrderService implements OnModuleInit {
     } catch (e) {
       Logger.error(`${e.message}`)
     }
-    return applied
+    return result === 'applied'
   }
 
   checkRedis(sym: string) {

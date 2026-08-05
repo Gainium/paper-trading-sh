@@ -40,6 +40,17 @@ export type UserBalanceResponse = {
   balance: { asset: string; free: number; locked: number }[]
 }
 
+/**
+ * `applied`   — the delta landed in full.
+ * `contained` — it asked to release more than the wallet held, the clamp took
+ *               the excess back off the credit side and the corrected write
+ *               landed, so the ledger is still consistent with the position it
+ *               backs. Not a full apply, but nothing was lost or minted.
+ * `failed`    — nothing landed, or part of the delta set was skipped: the
+ *               wallet may now disagree with the open orders.
+ */
+export type WalletDeltaResult = 'applied' | 'contained' | 'failed'
+
 export class UserService {
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
@@ -250,32 +261,41 @@ export class UserService {
   }
 
   /**
-   * Returns true when every delta was applied in full.
+   * Returns `applied` when every delta landed in full, `contained` when a clamp
+   * absorbed an over-release without leaving the ledger inconsistent, `failed`
+   * otherwise. Only `applied` means the caller got what it asked for.
    *
    * Debits are applied before credits. `applyWalletDelta` keeps one wallet's
    * free/locked pair consistent, but a delta set spanning two assets (a spot
    * fill credits the bought asset and debits the sold one) would still mint
    * balance if the credit landed while the debit was refused, so nothing is
-   * credited unless every debit stuck.
+   * credited unless every debit stuck — a clamped debit aborts the credit pass
+   * exactly as a failed one does, which is why a delta set that still had
+   * credits to skip is reported as failed rather than contained.
    */
   async increaseUserBalance(
     user: mongoose.Schema.Types.ObjectId | mongoose.Types.ObjectId,
     ...updates: { asset: string; free: number; locked: number }[]
-  ): Promise<boolean> {
+  ): Promise<WalletDeltaResult> {
     const isDebit = (u: { free: number; locked: number }) =>
       u.free < 0 || u.locked < 0
+    const credits = updates.filter((u) => !isDebit(u))
     const debited = await Promise.all(
       updates.filter(isDebit).map((u) => this.applyWalletDelta(user, u)),
     )
-    if (!debited.every(Boolean)) {
-      return false
+    if (debited.includes('failed')) {
+      return 'failed'
+    }
+    if (debited.includes('contained')) {
+      return credits.length ? 'failed' : 'contained'
     }
     const credited = await Promise.all(
-      updates
-        .filter((u) => !isDebit(u))
-        .map((u) => this.applyWalletDelta(user, u)),
+      credits.map((u) => this.applyWalletDelta(user, u)),
     )
-    return credited.every(Boolean)
+    if (credited.includes('failed')) {
+      return 'failed'
+    }
+    return credited.includes('contained') ? 'contained' : 'applied'
   }
 
   /**
@@ -296,35 +316,22 @@ export class UserService {
    * opening a futures position whose fee the wallet cannot quite cover now locks
    * that much less margin instead of conjuring the fee. When the credit side
    * cannot absorb the shortfall (a net debit larger than the wallet) nothing is
-   * applied at all, and either way the caller is told the delta did not land.
+   * applied at all.
+   *
+   * A clamp that absorbed the whole over-release is reported as `contained`,
+   * not as a failure: the wallet it wrote is consistent, so the callers must
+   * not log it as an accounting break — only a delta that could not be
+   * contained is an error.
    */
   private async applyWalletDelta(
     user: mongoose.Schema.Types.ObjectId | mongoose.Types.ObjectId,
     u: { asset: string; free: number; locked: number },
-  ): Promise<boolean> {
+  ): Promise<WalletDeltaResult> {
     const filter = { user: user, asset: u.asset }
     if (await this.incWalletGuarded(filter, u.free, u.locked)) {
-      return true
+      return 'applied'
     }
     const wallet = await this.walletModel.findOne(filter).exec()
-    if (!wallet && u.free >= 0 && u.locked >= 0) {
-      // First write for this (user, asset): nothing to guard against, the
-      // guarded $inc only missed because the doc does not exist yet.
-      return await this.walletModel
-        .updateOne(
-          filter,
-          { ...filter, $inc: { free: u.free, locked: u.locked } },
-          { upsert: true },
-        )
-        .exec()
-        .then(() => true)
-        .catch((e) => {
-          Logger.error(
-            `Failed to create user balance ${e?.message || e}, user - ${user}, asset - ${u.asset}, free - ${u.free}, locked - ${u.locked}`,
-          )
-          return false
-        })
-    }
     // How much of each requested debit the wallet cannot cover.
     const shortOf = (have: number, delta: number) =>
       delta < 0 ? Math.max(0, -delta - Math.max(have, 0)) : 0
@@ -336,21 +343,60 @@ export class UserService {
     const free = u.free > 0 ? u.free - shortfall : u.free + shortFree
     const locked = u.locked > 0 ? u.locked - shortfall : u.locked + shortLocked
     const absorbed =
-      shortfall > 0 &&
       free + locked <= u.free + u.locked - walletBalanceMin &&
       free >= -Math.max(wallet?.free ?? 0, 0) &&
       locked >= -Math.max(wallet?.locked ?? 0, 0)
     const applied =
-      absorbed && (await this.incWalletGuarded(filter, free, locked))
+      absorbed &&
+      // Nothing survived the clamp — a release against a lock that is not
+      // there is a no-op, and writing it would only create an empty wallet.
+      ((free === 0 && locked === 0) ||
+        // The guarded $inc can never match a wallet doc that does not exist
+        // yet, so the first write for this (user, asset) has to upsert. It
+        // upserts the CLAMPED pair, which with nothing to take from is never
+        // negative, so a delta that is part release and part credit still
+        // lands its credit instead of being dropped whole.
+        (wallet
+          ? await this.incWalletGuarded(filter, free, locked)
+          : await this.upsertWallet(filter, u, free, locked)))
+    if (applied && shortfall === 0) {
+      return 'applied'
+    }
     // Fully absorbed by the clamp = contained, no ledger damage: log it as a
     // warning so it stops paging. Only an unabsorbed delta is an error.
     const message = `Wallet over-release, user - ${user}, asset - ${u.asset}, requested free - ${u.free}, locked - ${u.locked}, wallet free - ${wallet?.free ?? 0}, locked - ${wallet?.locked ?? 0}, applied free - ${applied ? free : 0}, locked - ${applied ? locked : 0}`
     if (applied) {
       Logger.warn(message)
-    } else {
-      Logger.error(message)
+      return 'contained'
     }
-    return false
+    Logger.error(message)
+    return 'failed'
+  }
+
+  /** First write for a (user, asset) pair: the guarded $inc matches nothing. */
+  private async upsertWallet(
+    filter: {
+      user: mongoose.Schema.Types.ObjectId | mongoose.Types.ObjectId
+      asset: string
+    },
+    u: { asset: string; free: number; locked: number },
+    free: number,
+    locked: number,
+  ): Promise<boolean> {
+    return await this.walletModel
+      .updateOne(
+        filter,
+        { ...filter, $inc: { free, locked } },
+        { upsert: true },
+      )
+      .exec()
+      .then(() => true)
+      .catch((e) => {
+        Logger.error(
+          `Failed to create user balance ${e?.message || e}, user - ${filter.user}, asset - ${u.asset}, free - ${u.free}, locked - ${u.locked}`,
+        )
+        return false
+      })
   }
 
   private async incWalletGuarded(
