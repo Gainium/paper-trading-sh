@@ -77,7 +77,15 @@ class Exchange extends AbstractExchange implements Exchange {
                   reason: null,
                 }
               } else {
-                Logger.error(`Symbol not found in cache: ${symbol}`)
+                // A pair the venue no longer lists is legitimately absent from
+                // its all-prices payload, yet paper wallets keep the leftover
+                // asset and still get valued — so this miss is expected and the
+                // exchange-connector call below already covers it. Warn (stdout)
+                // instead of error (stderr), and name the exchange: without it
+                // the line cannot be attributed to a venue.
+                Logger.warn(
+                  `Symbol not found in cache: ${symbol} on ${this.exchange}, falling back to exchange API`,
+                )
               }
             }
           }
