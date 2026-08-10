@@ -41,15 +41,25 @@ export type UserBalanceResponse = {
 }
 
 /**
- * `applied`   — the delta landed in full.
- * `contained` — it asked to release more than the wallet held, the clamp took
- *               the excess back off the credit side and the corrected write
- *               landed, so the ledger is still consistent with the position it
- *               backs. Not a full apply, but nothing was lost or minted.
- * `failed`    — nothing landed, or part of the delta set was skipped: the
- *               wallet may now disagree with the open orders.
+ * `applied`      — the delta landed in full.
+ * `contained`    — it asked to release more than the wallet held, the clamp
+ *                  took the excess back off the credit side and the corrected
+ *                  write landed, so the ledger is still consistent with the
+ *                  position it backs. Not a full apply, but nothing was lost
+ *                  or minted.
+ * `insufficient` — the wallet does not hold enough free balance to cover the
+ *                  debit. NOTHING was written, so the ledger is exactly where
+ *                  it started and the caller rejects the order the same way a
+ *                  real exchange would. An ordinary affordability rejection,
+ *                  not an accounting break.
+ * `failed`       — nothing landed, or part of the delta set was skipped: the
+ *                  wallet may now disagree with the open orders.
  */
-export type WalletDeltaResult = 'applied' | 'contained' | 'failed'
+export type WalletDeltaResult =
+  | 'applied'
+  | 'contained'
+  | 'insufficient'
+  | 'failed'
 
 export class UserService {
   constructor(
@@ -287,12 +297,26 @@ export class UserService {
       return 'failed'
     }
     if (debited.includes('contained')) {
-      return credits.length ? 'failed' : 'contained'
+      // A contained debit already wrote its clamped pair, so anything the set
+      // still has to skip afterwards leaves the wallet inconsistent.
+      return credits.length || debited.includes('insufficient')
+        ? 'failed'
+        : 'contained'
+    }
+    if (debited.length && debited.every((r) => r === 'insufficient')) {
+      // Not one delta of the set was written, so the skipped credits cost
+      // nothing: the wallet is untouched and the caller just cannot afford the
+      // order. Reported apart from `failed` so it is not logged as a break.
+      return 'insufficient'
+    }
+    if (debited.includes('insufficient')) {
+      // One debit landed while another was refused — a genuine partial apply.
+      return 'failed'
     }
     const credited = await Promise.all(
       credits.map((u) => this.applyWalletDelta(user, u)),
     )
-    if (credited.includes('failed')) {
+    if (credited.includes('failed') || credited.includes('insufficient')) {
       return 'failed'
     }
     return credited.includes('contained') ? 'contained' : 'applied'
@@ -368,6 +392,18 @@ export class UserService {
     if (applied) {
       Logger.warn(message)
       return 'contained'
+    }
+    // Nothing was written either way, but the two reasons are different events.
+    // A shortfall entirely on the debited `free` side is just "the user cannot
+    // afford this order", which the caller turns into a 400 exactly as the real
+    // exchange does — it is not an over-release and must not page anyone. Only
+    // a `locked` release the wallet does not hold means the lock accounting
+    // itself has drifted, and that stays an error.
+    if (shortLocked === 0 && shortFree > 0) {
+      Logger.warn(
+        `Insufficient free balance, user - ${user}, asset - ${u.asset}, requested free - ${u.free}, locked - ${u.locked}, wallet free - ${wallet?.free ?? 0}, locked - ${wallet?.locked ?? 0}, short by - ${shortFree}`,
+      )
+      return 'insufficient'
     }
     Logger.error(message)
     return 'failed'

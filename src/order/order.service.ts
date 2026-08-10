@@ -1555,6 +1555,15 @@ export class OrderService implements OnModuleInit {
           data,
         )}`,
       )
+    } else if (result === 'insufficient') {
+      // The wallet cannot fund the debit, so nothing was written and the caller
+      // rejects the order with `Not enough balance` — the same answer the real
+      // exchange gives. An ordinary rejection, not an accounting break.
+      Logger.warn(
+        `Balance update skipped, insufficient free balance, user - ${user}, updates - ${JSON.stringify(
+          data,
+        )}`,
+      )
     } else if (result === 'failed') {
       Logger.error(
         `Balance update was not fully applied, user - ${user}, updates - ${JSON.stringify(
