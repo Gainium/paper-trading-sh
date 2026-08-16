@@ -362,19 +362,33 @@ export class UserService {
     const shortFree = shortOf(wallet?.free ?? 0, u.free)
     const shortLocked = shortOf(wallet?.locked ?? 0, u.locked)
     const shortfall = shortFree + shortLocked
+    // The most either field may be decremented by is everything the wallet has.
+    const freeFloor = -Math.max(wallet?.free ?? 0, 0)
+    const lockedFloor = -Math.max(wallet?.locked ?? 0, 0)
     // Clamp each debit to what is actually there and take the same amount off
     // the credit side, so the applied pair never nets to more than was asked.
-    const free = u.free > 0 ? u.free - shortfall : u.free + shortFree
-    const locked = u.locked > 0 ? u.locked - shortfall : u.locked + shortLocked
+    // Clamp straight TO the floor rather than adding the shortfall back on:
+    // `u.locked + shortLocked` only approximates it, and on a release several
+    // times bigger than the lock the sum rounds a single ulp past the floor,
+    // which the exact `>=` below then rejects outright — refusing a release
+    // the wallet could in fact cover in full.
+    const free = u.free > 0 ? u.free - shortfall : Math.max(u.free, freeFloor)
+    const locked =
+      u.locked > 0 ? u.locked - shortfall : Math.max(u.locked, lockedFloor)
     const absorbed =
       free + locked <= u.free + u.locked - walletBalanceMin &&
-      free >= -Math.max(wallet?.free ?? 0, 0) &&
-      locked >= -Math.max(wallet?.locked ?? 0, 0)
+      free >= freeFloor &&
+      locked >= lockedFloor
     const applied =
-      absorbed &&
       // Nothing survived the clamp — a release against a lock that is not
-      // there is a no-op, and writing it would only create an empty wallet.
-      ((free === 0 && locked === 0) ||
+      // there removes nothing and adds nothing, so it is a no-op whatever the
+      // net check says, and writing it would only create an empty wallet. It
+      // has to be tested BEFORE `absorbed`, not under it: that check asks
+      // whether the clamp was taken back off a credit side, and a delta that
+      // credits nothing has none to take it off — its clamped pair necessarily
+      // nets above the requested one, so the no-op could never be reached.
+      (free === 0 && locked === 0) ||
+      (absorbed &&
         // The guarded $inc can never match a wallet doc that does not exist
         // yet, so the first write for this (user, asset) has to upsert. It
         // upserts the CLAMPED pair, which with nothing to take from is never
