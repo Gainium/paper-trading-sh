@@ -216,6 +216,17 @@ export class UserService {
     key: string,
     secret: string,
   ): Promise<UserDocument> {
+    // SECURITY: reject non-string credentials before they reach the query.
+    // These are typed `string` but the type is erased at runtime: Express' qs
+    // parser turns `key[$gt]=` in a query string -- and a nested object in a
+    // JSON body -- into an object, which Mongoose forwards as MongoDB query
+    // operators. Without this guard,
+    //   { key: { $gt: '' }, secret: { $gt: '' } }
+    // matches the first user in the collection and bypasses authentication
+    // entirely. Every authenticated entry point converges on this method.
+    if (typeof key !== 'string' || typeof secret !== 'string') {
+      throw new HttpException('User not found', 400)
+    }
     const user = await this.userModel.findOne({ key, secret }).exec()
     if (!user) {
       throw new HttpException('User not found', 400)

@@ -2,6 +2,10 @@
 All notable changes to this project will be documented in this file.  
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] - 2026-08-18
+### Security
+- Authentication now rejects non-string API credentials before they reach the database. `key` and `secret` are declared `string`, but that type is erased at runtime and the service installs no global `ValidationPipe`, so an object supplied in a query string or JSON body was forwarded into the Mongoose filter as MongoDB query operators — turning the exact-match credential lookup in `getUserByKeyAndSecretOrThrow` into a predicate that matched an arbitrary account. Since every authenticated entry point (user, order, and the WebSocket gateway) converges on that one method, this bypassed authentication for all of them. Reported as GHSA-8p69-9fjc-6g78.
+
 ## [1.3.3] - 2026-08-05
 ### Fixed
 - Paper futures: a liquidation now closes the position that was actually liquidated. The close re-derived its target from `(user, positionSide)`, so when a user held several same-side positions on one symbol every liquidation resolved to whichever came first — one closed, the rest stayed `NEW` with an untouched `positionAmt` and were re-liquidated on every following tick without end.
