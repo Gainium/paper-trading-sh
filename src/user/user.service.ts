@@ -526,7 +526,10 @@ export class UserService {
     coinToTopUp: string,
   ) {
     const user = await this.getUserByKeyAndSecretOrThrow(key, secret)
-    if (usdtBalance < 0) {
+    // SECURITY (GHSA-5xf3-v5jf-jwrc): `NaN < 0` is false, so a NaN amount slid
+    // past a bare `< 0` check and `$inc` corrupted the wallet balance to NaN.
+    // Infinity would do the same. Require a real, finite, non-negative number.
+    if (!Number.isFinite(usdtBalance) || usdtBalance < 0) {
       throw new HttpException('Insufficient amount', 400)
     }
     await this.walletModel

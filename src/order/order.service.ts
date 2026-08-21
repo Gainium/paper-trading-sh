@@ -377,7 +377,12 @@ export class OrderService implements OnModuleInit {
       secret,
     )
     const orderInRam = this.getOrderByExternalIdAndSymbol(symbol, externalId)
-    if (orderInRam) {
+    // SECURITY (GHSA-5xf3-v5jf-jwrc): `currentOrders` is a process-global cache
+    // and the lookup above is by (symbol, externalId) only — no ownership test.
+    // Returning a hit unconditionally handed one tenant another tenant's open
+    // order. Confine it to the owner; a miss falls through to the DB query
+    // below, which is already scoped to `user.id`.
+    if (orderInRam && `${orderInRam.user}` === `${user.id}`) {
       return {
         symbol: orderInRam.symbol,
         orderId: orderInRam._id.toString(),
@@ -500,7 +505,9 @@ export class OrderService implements OnModuleInit {
       throw new HttpException('Empty order id', 400)
     }
     const orderInRam = this.getOrderById(orderId)
-    if (orderInRam) {
+    // SECURITY (GHSA-5xf3-v5jf-jwrc): global cache, no ownership test — see
+    // getOrderByKeySecretExternalIdAndSymbol above.
+    if (orderInRam && `${orderInRam.user}` === `${user.id}`) {
       return {
         symbol: orderInRam.symbol,
         orderId: orderInRam._id.toString(),

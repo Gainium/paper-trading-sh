@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.  
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - 2026-08-21
+### Security
+- A wallet top-up with a non-finite amount is rejected instead of corrupting the balance. The guard was a bare `amount < 0`, and `NaN < 0` is false, so `NaN` slipped past it and `$inc` wrote the wallet's free balance to `NaN`. Reported as GHSA-5xf3-v5jf-jwrc.
+- Order lookups no longer return another tenant's order out of the in-memory cache. `GET /order` and `GET /order/{id}` authenticated the caller and then read a process-global cache keyed only by `(symbol, externalId)` or by order id — with no ownership check — returning that hit before the user-scoped database query ever ran. A cached order now goes only to its owner; anything else falls through to the query, which was already correctly scoped. Reported as GHSA-5xf3-v5jf-jwrc.
+
 ## [1.3.4] - 2026-08-18
 ### Security
 - Authentication now rejects non-string API credentials before they reach the database. `key` and `secret` are declared `string`, but that type is erased at runtime and the service installs no global `ValidationPipe`, so an object supplied in a query string or JSON body was forwarded into the Mongoose filter as MongoDB query operators — turning the exact-match credential lookup in `getUserByKeyAndSecretOrThrow` into a predicate that matched an arbitrary account. Since every authenticated entry point (user, order, and the WebSocket gateway) converges on that one method, this bypassed authentication for all of them. Reported as GHSA-8p69-9fjc-6g78.
