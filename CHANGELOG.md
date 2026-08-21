@@ -2,6 +2,10 @@
 All notable changes to this project will be documented in this file.  
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - 2026-08-21
+### Security
+- The listen interface is configurable via `APP_HOST`. The default is unchanged — all interfaces, the exact `listen(port)` call this service has always made — because under Docker this runs as its own container and the api/connector containers reach it over the compose network. A deployment where every client shares one host can now set `APP_HOST=127.0.0.1` and take the service off the network entirely, which is worth doing: callers are authenticated by an API key/secret pair with no rate limiting behind it.
+
 ## [1.3.5] - 2026-08-21
 ### Security
 - A wallet top-up with a non-finite amount is rejected instead of corrupting the balance. The guard was a bare `amount < 0`, and `NaN < 0` is false, so `NaN` slipped past it and `$inc` wrote the wallet's free balance to `NaN`. Reported as GHSA-5xf3-v5jf-jwrc.
