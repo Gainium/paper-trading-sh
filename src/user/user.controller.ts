@@ -1,7 +1,16 @@
 import { CreateUserDto, UserService } from './user.service'
-import { Body, Controller, Get, Post, Put, Query } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common'
 import { ExchangeEnum } from '../exchange/types'
 import { PositionSide } from '../schema/positions.schema'
+import { CredentialProbeThrottleGuard } from '../common/credentialProbeThrottle.guard'
 
 @Controller('/user')
 export class UserController {
@@ -28,6 +37,10 @@ export class UserController {
     return this.userService.getUserFeesByKeyAndSecret(key, secret)
   }
 
+  // SECURITY (GHSA-5xf3-v5jf-jwrc): bound the credential oracle. This route
+  // answers "are these credentials valid?" as a clean boolean, with plaintext
+  // secrets behind it and no lockout anywhere.
+  @UseGuards(CredentialProbeThrottleGuard)
   @Get('/verify')
   async verifyUser(@Query('key') key: string, @Query('secret') secret: string) {
     const user = await this.userService.getUserFeesByKeyAndSecret(key, secret)
