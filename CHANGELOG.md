@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file.  
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.8] - 2026-08-27
+### Added
+- **The simulated fee is now reported on the order**, as `feePaid` + `feeSide` on `CommonOrder`, keeping this service in lockstep with exchange-connector core 1.20.8, where every venue now records the fee it actually charged. The simulator has always CHARGED a fee — `order.fee`, accrued across partial fills and debited from the paper wallet — and never reported one, so a paper deal's cost reached main-app only as a `qty * price * rate` estimate. Reporting the number the simulation actually took lets the consumer treat the paper and live paths identically. `feeAsset` and `feeBreakdown` are declared for contract parity but unused here: the simulator always charges in one side of the pair.
+- `feeSide` restates, in one place, the rule the simulator already applies when it debits the wallet — inverse futures settle in the base coin, linear futures in the quote coin, and spot takes the fee out of the asset RECEIVED (base on a buy, quote on a sell). Covered by a standalone ts-node check (`src/order/fees.spec.ts`; this repo has no test runner), written against the debit each code path performs so the two cannot drift apart silently.
+- A zero fee is reported as NO fee rather than `feePaid: '0'`, matching the live connectors: an absent fee means "keep your estimate", and a `0` would teach a consumer that the fill was free.
+
 ## [1.3.7] - 2026-08-24
 ### Security
 - `GET /user/verify` is rate limited. It answers "are these credentials valid?" as a clean boolean, with plaintext secrets behind it and no lockout anywhere, so guessing was unbounded (GHSA-5xf3-v5jf-jwrc). Default 30 requests per minute per source, which sits far above the legitimate caller — main-app verifying a paper connection — and far below a brute-force rate. Tune with `VERIFY_RATE_LIMIT` and `VERIFY_RATE_WINDOW_MS`. The limiter is deliberately dependency-free and bounds its own key table, so it cannot itself be turned into a memory-exhaustion vector.

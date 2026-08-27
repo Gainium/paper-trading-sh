@@ -25,6 +25,7 @@ import {
   Tick,
 } from '../exchange/types'
 import { isFutures, isCoinm } from '../exchange/utils'
+import { paperOrderFee } from './fees'
 import { UserGateway } from '../ws/user.gateway'
 import { IdMute, IdMutex } from '../utils/mutex'
 import {
@@ -71,6 +72,22 @@ export type CommonOrder = {
     tradeId: string
   }[]
   reduceOnly?: boolean
+  /**
+   * The fee actually charged for this order, mirroring the exchange-connector
+   * contract field for field so the simulated path and the live path stay one
+   * code path in main-app. Optional and additive, exactly as they are there.
+   *
+   * The simulator has always CHARGED a fee (`order.fee`, accrued across
+   * partial fills and debited from the paper wallet) and never REPORTED one,
+   * so a paper deal's cost was only ever main-app's `qty * price * rate`
+   * estimate. `feeAsset` and `feeBreakdown` are declared for contract parity —
+   * the simulator always charges in one side of the pair, so it sets `feeSide`
+   * — and exist so a consumer can be written against one shape.
+   */
+  feePaid?: string
+  feeSide?: 'base' | 'quote'
+  feeAsset?: string
+  feeBreakdown?: { asset: string; amount: string }[]
 }
 
 const CreateOrderMutex = new IdMutex()
@@ -384,6 +401,7 @@ export class OrderService implements OnModuleInit {
     // below, which is already scoped to `user.id`.
     if (orderInRam && `${orderInRam.user}` === `${user.id}`) {
       return {
+        ...paperOrderFee(orderInRam),
         symbol: orderInRam.symbol,
         orderId: orderInRam._id.toString(),
         clientOrderId: orderInRam.externalId,
@@ -409,6 +427,7 @@ export class OrderService implements OnModuleInit {
     }
 
     return {
+      ...paperOrderFee(order),
       symbol: order.symbol,
       orderId: order._id.toString(),
       clientOrderId: order.externalId,
@@ -474,6 +493,7 @@ export class OrderService implements OnModuleInit {
     const preparedOrders = []
     for (const order of orders) {
       preparedOrders.push({
+        ...paperOrderFee(order),
         symbol: order.symbol,
         orderId: order._id,
         clientOrderId: order.externalId,
@@ -509,6 +529,7 @@ export class OrderService implements OnModuleInit {
     // getOrderByKeySecretExternalIdAndSymbol above.
     if (orderInRam && `${orderInRam.user}` === `${user.id}`) {
       return {
+        ...paperOrderFee(orderInRam),
         symbol: orderInRam.symbol,
         orderId: orderInRam._id.toString(),
         clientOrderId: orderInRam.externalId,
@@ -533,6 +554,7 @@ export class OrderService implements OnModuleInit {
       throw new HttpException('Order not found', 400)
     }
     return {
+      ...paperOrderFee(order),
       symbol: order.symbol,
       orderId: order._id,
       clientOrderId: order.externalId,
