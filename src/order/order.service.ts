@@ -1461,9 +1461,21 @@ export class OrderService implements OnModuleInit {
           }
         } else if (diff <= 0) {
           if (order.reduceOnly) {
-            order.fee -= isCoinm(order.exchange)
-              ? (Math.abs(diff) * symbol.quoteAsset.minAmount) / order.price
-              : Math.abs(diff) * feePerc
+            // Refund the fee for the units this clamp is about to drop. `diff`
+            // is a BASE quantity and `order.fee` is denominated in what the
+            // fill settles in, so the refund has to go through the same
+            // conversion the charge did — `* order.price` on linear,
+            // `* contractSize / order.price` on coin-m — and then through the
+            // rate. Applying only half of that (a bare quantity on linear, a
+            // bare notional on coin-m) leaves the order holding the fee for
+            // units it never closed when the asset is priced above 1, and
+            // refunds more than was ever charged when it is priced below 1,
+            // ending with a NEGATIVE fee that credits the paper wallet. The
+            // non-reduceOnly branch below derives the same number the same way.
+            order.fee -=
+              (isCoinm(order.exchange)
+                ? (Math.abs(diff) * symbol.quoteAsset.minAmount) / order.price
+                : Math.abs(diff) * order.price) * feePerc
             order.amount = current.positionAmt
             order.filledAmount = order.amount
             order.quoteAmount = order.amount * order.price
