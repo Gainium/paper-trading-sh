@@ -26,17 +26,52 @@ import { isCoinm, isFutures } from '../exchange/utils'
  * A zero fee is reported as no fee at all rather than `feePaid: '0'` — the
  * same rule the live connectors follow, so that a consumer treats an
  * unobservable fee as "keep your estimate" rather than as "this fill was
- * free". A paper account configured with a 0% fee genuinely paid nothing, and
- * an estimate of nothing is also nothing, so the two agree.
+ * free". This is a separate question from WHICH asset a real fee came out
+ * of — see `isThirdAssetFeeSymbol` below.
  */
+
+/**
+ * Symbols whose fee is reported as paid in a THIRD asset (default ticker
+ * `GNM`) rather than split onto `feeSide: base | quote` — for testing how
+ * the platform behaves against a genuine BNB/BGB/KCS-style discount account
+ * without one. Comma-separated, exchange-agnostic (matches `order.symbol`),
+ * e.g. `PAPER_FEE_ASSET_SYMBOLS=BTCUSDT,ETHUSDT` (spec 004).
+ *
+ * The charged amount and the paper wallet's debit are UNCHANGED — this only
+ * changes which asset the fee is reported as having come out of. A real
+ * discount account's `fee` amount is the same regardless of which asset
+ * happened to cover it; this mirrors that.
+ */
+export function isThirdAssetFeeSymbol(symbol: string): boolean {
+  const list = process.env.PAPER_FEE_ASSET_SYMBOLS
+  if (!list) {
+    return false
+  }
+  const target = `${symbol ?? ''}`.toUpperCase()
+  return list
+    .split(',')
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean)
+    .includes(target)
+}
+
+/** The ticker `isThirdAssetFeeSymbol` symbols report their fee as paid in. */
+export function thirdAssetFeeTicker(): string {
+  return (process.env.PAPER_FEE_ASSET || 'GNM').trim().toUpperCase()
+}
+
 export function paperOrderFee(order: {
   fee?: number
   exchange: ExchangeEnum
   side: OrderSide
-}): { feePaid?: string; feeSide?: 'base' | 'quote' } {
+  symbol: string
+}): { feePaid?: string; feeSide?: 'base' | 'quote'; feeAsset?: string } {
   const fee = Number(order?.fee)
   if (!Number.isFinite(fee) || fee <= 0) {
     return {}
+  }
+  if (isThirdAssetFeeSymbol(order.symbol)) {
+    return { feePaid: `${fee}`, feeAsset: thirdAssetFeeTicker() }
   }
   const feeSide: 'base' | 'quote' = isFutures(order.exchange)
     ? isCoinm(order.exchange)

@@ -2,6 +2,14 @@
 All notable changes to this project will be documented in this file.  
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.11] - 2026-09-08
+### Added
+- `PAPER_FEE_ASSET_SYMBOLS` (comma-separated) reports the listed symbols' fee as paid in a third asset (`PAPER_FEE_ASSET`, default `GNM`) instead of split onto `feeSide: base | quote` — for testing the platform's BNB/BGB/KCS-style discount-asset path without a real account that has one. The charged amount and wallet debit are unchanged; only the reported asset changes. Spec 004. Supersedes an earlier, unshipped `PAPER_ZERO_FEE_SYMBOLS` attempt at the same underlying need — a confirmed-zero fee has nowhere to land in the observed-fee contract (`hasObservedFee`/`observedFeeSplit` both gate on `amount > 0`, by design) and TP-quantity sizing never reads a fee amount for anything besides the third-asset check, so forcing 0% never could have changed TP sizing. The third-asset path is real, observed, and already the exact gate (`ordersFeeIsThirdAssetOnly`, spec 014/015) that skips the TP gross-up.
+
+## [1.3.10] - 2026-09-08
+### Fixed
+- `UserGateway.sendOrderToClient`'s socket.io `order` push now carries `feePaid`/`feeSide`, the same fields `paperOrderFee` has reported on the REST endpoints since 1.3.8. That push feeds main-app's live order-update stream — the path TP placement actually runs on — and every one of its 5 call sites had been passing the raw order (`fee`/`feePerc` only) instead. Fixed at the one place all five funnel through, so a filled paper order's fee now reaches main-app on both paths a real exchange's fee does. Spec 003; companion fixes in `websocket-connector-sh` (spec 004) and `main-app-sh` (spec 017) are required for the fee to actually reach main-app.
+
 ## [1.3.9] - 2026-09-03
 ### Added
 - CI now runs a real `npm test` (mocha) on every PR. `fees.spec.ts` was

@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io'
 import { Inject, Logger } from '@nestjs/common'
 import { UserService } from '../user/user.service'
 import { OrderDataType } from '../schema/order.schema'
+import { paperOrderFee } from '../order/fees'
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -71,9 +72,17 @@ export class UserGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!clientIds || clientIds.size === 0) {
       return
     }
-    this.server
-      .to(Array.from(clientIds))
-      .emit('order', { type: 'update', data })
+    // The REST endpoints have reported `feePaid`/`feeSide` (paperOrderFee,
+    // 1.3.8) since the simulator started mirroring the fee real connectors
+    // report — but only there. This socket push feeds main-app's live
+    // order-update stream, the path TP placement actually runs on, and it
+    // was never updated to carry the same fields (spec 003). Attaching them
+    // here, at the one place every order push already funnels through,
+    // closes that gap for every call site at once.
+    this.server.to(Array.from(clientIds)).emit('order', {
+      type: 'update',
+      data: { ...data, ...paperOrderFee(data) },
+    })
   }
 
   @SubscribeMessage('subscribeOutboundAccountInfo')
