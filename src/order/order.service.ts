@@ -94,6 +94,10 @@ const CreateOrderMutex = new IdMutex()
 const UpdateOrderMutex = new IdMutex()
 const TickerMutex = new IdMutex()
 const commonMutex = new IdMutex()
+// Serialises processFuturesPosition per user and symbol. Kept apart from
+// commonMutex: lockLeverage/unLockLeverage take commonMutex on a user-symbol key
+// and are called from inside processFuturesPosition.
+const FuturesPositionMutex = new IdMutex()
 
 // Cancelling an order that is already gone (filled / cancelled / expired) is an
 // EXPECTED outcome of the liquidation sweep, not a failure: closeFuturePosition
@@ -1345,6 +1349,17 @@ export class OrderService implements OnModuleInit {
     )
   }
 
+  // Fills for one user and symbol must not interleave: the position lookup and
+  // the `!current` create below are separated by awaits, so two fills on the
+  // same tick (processTickerQueue does not await processLimitOrder, which is
+  // only locked per order) would both see no position and open two copies.
+  // Keyed without the exchange because the in-memory lookup below ignores it.
+  @IdMute(
+    FuturesPositionMutex,
+    (order: Omit<OrderDataType, 'id'>) =>
+      //@ts-ignore
+      `${order.user?._id ?? order.user}-${order.symbol}`,
+  )
   private async processFuturesPosition(
     order: Omit<OrderDataType, 'id'> & { id?: string },
     leverage: number,

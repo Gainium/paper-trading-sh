@@ -2,6 +2,10 @@
 All notable changes to this project will be documented in this file.  
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.12] - 2026-10-22
+### Fixed
+- Two paper futures fills for the same user and symbol arriving on the same price tick no longer open two separate positions. The position lookup and the create for a new position were separated by database round trips and serialised only per order, so both fills could miss the position and each create one; the second copy was never reduced or closed. Position updates are now serialised per user and symbol, so the fills merge into one position as on the exchange. Spec 005.
+
 ## [1.3.11] - 2026-09-08
 ### Added
 - `PAPER_FEE_ASSET_SYMBOLS` (comma-separated) reports the listed symbols' fee as paid in a third asset (`PAPER_FEE_ASSET`, default `GNM`) instead of split onto `feeSide: base | quote` — for testing the platform's BNB/BGB/KCS-style discount-asset path without a real account that has one. The charged amount and wallet debit are unchanged; only the reported asset changes. Spec 004. Supersedes an earlier, unshipped `PAPER_ZERO_FEE_SYMBOLS` attempt at the same underlying need — a confirmed-zero fee has nowhere to land in the observed-fee contract (`hasObservedFee`/`observedFeeSplit` both gate on `amount > 0`, by design) and TP-quantity sizing never reads a fee amount for anything besides the third-asset check, so forcing 0% never could have changed TP sizing. The third-asset path is real, observed, and already the exact gate (`ordersFeeIsThirdAssetOnly`, spec 014/015) that skips the TP gross-up.
