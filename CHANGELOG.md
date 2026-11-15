@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file.  
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-15
+
+### Added
+
+- Best bid and best ask (bookTicker), forwarded from the real exchange
+
 ## [1.3.12] - 2026-10-22
 ### Fixed
 - Two paper futures fills for the same user and symbol arriving on the same price tick no longer open two separate positions. The position lookup and the create for a new position were separated by database round trips and serialised only per order, so both fills could miss the position and each create one; the second copy was never reduced or closed. Position updates are now serialised per user and symbol, so the fills merge into one position as on the exchange. Spec 005.
@@ -143,5 +149,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Changed  
 
 
-### Fixed  
-
+### Fixed
