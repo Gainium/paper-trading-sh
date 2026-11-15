@@ -8,8 +8,13 @@ import type {
 } from './types'
 import { ExchangeIntervals, StatusEnum } from './types'
 
+/** Top of the order book: best bid and best ask prices. */
+export type BookTicker = { bid: number; ask: number }
+
 export interface Exchange {
   latestPrice(symbol: string): Promise<BaseReturn<number>>
+
+  bookTicker(symbol: string): Promise<BaseReturn<BookTicker>>
 
   getExchangeInfo(symbol: string): Promise<BaseReturn<ExchangeInfo>>
 
@@ -64,6 +69,9 @@ abstract class AbsctractExchange implements Exchange {
   }
 
   abstract latestPrice(symbol: string): Promise<BaseReturn<number>>
+
+  /** Best bid / ask of the real venue (paper fills against real prices). */
+  abstract bookTicker(symbol: string): Promise<BaseReturn<BookTicker>>
 
   abstract getExchangeInfo(symbol: string): Promise<BaseReturn<ExchangeInfo>>
 

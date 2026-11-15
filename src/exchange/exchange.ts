@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common'
-import AbstractExchange from './abstractExchange'
+import AbstractExchange, { type BookTicker } from './abstractExchange'
 import {
   AllPricesResponse,
   BaseReturn,
@@ -45,6 +45,20 @@ class Exchange extends AbstractExchange implements Exchange {
         exchange: this.exchange,
       },
       isPrivate: true,
+    }).catch(this.handleError())
+  }
+
+  /** Best bid / ask straight from the connector: paper fills against the
+   * real venue's prices, so its book is the real one. No cache — a chasing
+   * limit needs the book at the moment it is priced. */
+  async bookTicker(symbol: string): Promise<BaseReturn<BookTicker>> {
+    return this.apiCall<BaseReturn<BookTicker>>({
+      endpoint: 'bookTicker',
+      method: 'GET',
+      params: {
+        symbol,
+        exchange: this.exchange,
+      },
     }).catch(this.handleError())
   }
 

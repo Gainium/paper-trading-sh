@@ -11,7 +11,7 @@ import {
   StatusEnum,
   TradeResponse,
 } from './types'
-import AbstractExchange from './abstractExchange'
+import AbstractExchange, { type BookTicker } from './abstractExchange'
 import { HttpException, Logger } from '@nestjs/common'
 import { InjectModel } from '@nestjs/mongoose'
 import { Model } from 'mongoose'
@@ -28,6 +28,13 @@ export class ExchangeService {
     symbol: string,
   ): Promise<BaseReturn<number>> {
     return this.getExchange(exchange).latestPrice(symbol)
+  }
+
+  async getBookTickerInExchange(
+    exchange: ExchangeEnum,
+    symbol: string,
+  ): Promise<BaseReturn<BookTicker>> {
+    return this.getExchange(exchange).bookTicker(symbol)
   }
 
   async getAllPrices(
