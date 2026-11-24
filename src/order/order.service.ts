@@ -124,6 +124,14 @@ const alreadyGoneOrderMessages = ['Unknown order']
 const orderRowIsGone = (res: UpdateWriteOpResult) =>
   res?.acknowledged === true && res.matchedCount === 0
 
+/**
+ * Upper bound on the persisted `filledAmount` for a fill of `fill` to be
+ * accepted: the row may not end up filled past its own `amount` (spec 007).
+ * The slack absorbs float error in `amount - (amount - filledAmount)` only.
+ */
+const fillGuard = (amount: number, fill: number) =>
+  amount - fill + Math.abs(amount) * 1e-12
+
 export class OrderService implements OnModuleInit {
   private redisClient: RedisWrapper | null = null
   private readonly watchSymbols: Map<string, Set<string>> = new Map()
@@ -1810,6 +1818,42 @@ export class OrderService implements OnModuleInit {
     }
   }
 
+  /**
+   * A limit fill's guarded `updateOne` matched nothing. Returns true when the
+   * row is really gone (see `orderRowIsGone`). Otherwise the row's fill guard
+   * refused it: the row already holds more fill than RAM assumed. RAM is reset
+   * to the row so the order cannot fill past its size, and false is returned.
+   */
+  private async limitFillRefused(order: OrderDataType): Promise<boolean> {
+    const row = await this.orderModel
+      .findOne(
+        { _id: order._id },
+        { filledAmount: 1, filledQuoteAmount: 1, fee: 1, status: 1 },
+      )
+      .lean()
+      .exec()
+    if (!row) {
+      return true
+    }
+    Logger.error(
+      `Limit fill refused, order already filled ${row.filledAmount} of ${order.amount}, order - ${order._id}, user - ${order.user}`,
+    )
+    const inRam = this.getOrderByExternalIdAndSymbol(
+      order.symbol,
+      order.externalId,
+    )
+    if (inRam) {
+      this.setOrder({
+        ...inRam,
+        filledAmount: row.filledAmount,
+        filledQuoteAmount: row.filledQuoteAmount,
+        fee: row.fee,
+        status: row.status,
+      })
+    }
+    return false
+  }
+
   @IdMute(UpdateOrderMutex, (order: OrderDataType) => order.externalId)
   private async processLimitOrder(order: OrderDataType, data: Tick) {
     if (
@@ -1833,6 +1877,12 @@ export class OrderService implements OnModuleInit {
       Logger.error(`Order ${order.externalId} already processed`)
       return
     }
+    // Size the fill from the order as it stands NOW, inside the mutex. The
+    // `order` argument is the RAM object processTickerQueue saw when the tick
+    // arrived. Another tick queued behind an in-flight fill on this order
+    // carries that same pre-fill object, and filling `amount - filledAmount`
+    // from it fills the remainder a second time.
+    order = inCurrent
     const queries: Promise<any>[] = []
     let symbol: ExchangeInfo
     let sym = `${order.symbol}@${order.exchange}`
@@ -1855,6 +1905,10 @@ export class OrderService implements OnModuleInit {
     // Set by the fill write below when it matched no document — see
     // `orderRowIsGone`.
     let rowIsGone = false
+    // Set when the row still exists but its fill guard refused the write — the
+    // RAM copy was ahead of the row. RAM has been re-synced from the row; the
+    // next tick fills whatever really remains.
+    let fillRefused = false
     const feePerc = order.feePerc || this.getUserFee('maker', order.exchange)
     const futures = isFutures(order.exchange)
     if (
@@ -1862,7 +1916,10 @@ export class OrderService implements OnModuleInit {
       order.price <= data.bestBid &&
       (futures || data.bidQty > 0)
     ) {
-      let baseAssetAmount = order.amount - order.filledAmount
+      let baseAssetAmount = Math.max(0, order.amount - order.filledAmount)
+      if (baseAssetAmount <= 0) {
+        return
+      }
       if (futures || order.price < data.bestBid) {
         isFilled = true
       } else if (baseAssetAmount <= data.bidQty) {
@@ -1891,7 +1948,10 @@ export class OrderService implements OnModuleInit {
       queries.push(
         this.orderModel
           .updateOne(
-            { _id: order._id },
+            {
+              _id: order._id,
+              filledAmount: { $lte: fillGuard(order.amount, baseAssetAmount) },
+            },
             {
               $inc: {
                 filledAmount: baseAssetAmount,
@@ -1906,36 +1966,42 @@ export class OrderService implements OnModuleInit {
           .exec()
           .then(async (res) => {
             if (orderRowIsGone(res)) {
-              rowIsGone = true
+              if (await this.limitFillRefused(order)) {
+                rowIsGone = true
+              } else {
+                fillRefused = true
+              }
               return
             }
             this.userGateway.sendOrderToClient(order.user.toString(), order)
+            // The wallet moves only for a fill the order row accepted.
+            if (!futures) {
+              await this.updateBalance(
+                order.user,
+                {
+                  free: quoteAssetAmount - fee,
+                  locked: 0,
+                  asset: symbol.quoteAsset.name,
+                },
+                {
+                  free: 0,
+                  asset: symbol.baseAsset.name,
+                  locked: -baseAssetAmount,
+                },
+              )
+            }
           }),
       )
-      if (!futures) {
-        queries.push(
-          this.updateBalance(
-            order.user,
-            {
-              free: quoteAssetAmount - fee,
-              locked: 0,
-              asset: symbol.quoteAsset.name,
-            },
-            {
-              free: 0,
-              asset: symbol.baseAsset.name,
-              locked: -baseAssetAmount,
-            },
-          ),
-        )
-      }
       this.setOrder(order)
     } else if (
       order.side === 'BUY' &&
       order.price >= data.bestAsk &&
       (futures || data.askQty > 0)
     ) {
-      let baseAssetAmount = order.amount - order.filledAmount
+      let baseAssetAmount = Math.max(0, order.amount - order.filledAmount)
+      if (baseAssetAmount <= 0) {
+        return
+      }
       if (futures || order.price > data.bestAsk) {
         isFilled = true
       } else if (baseAssetAmount <= data.askQty) {
@@ -1966,7 +2032,10 @@ export class OrderService implements OnModuleInit {
       queries.push(
         this.orderModel
           .updateOne(
-            { _id: order._id },
+            {
+              _id: order._id,
+              filledAmount: { $lte: fillGuard(order.amount, baseAssetAmount) },
+            },
             {
               $inc: {
                 filledAmount: baseAssetAmount,
@@ -1981,29 +2050,32 @@ export class OrderService implements OnModuleInit {
           .exec()
           .then(async (res) => {
             if (orderRowIsGone(res)) {
-              rowIsGone = true
+              if (await this.limitFillRefused(order)) {
+                rowIsGone = true
+              } else {
+                fillRefused = true
+              }
               return
             }
             this.userGateway.sendOrderToClient(order.user.toString(), order)
+            // The wallet moves only for a fill the order row accepted.
+            if (!futures) {
+              await this.updateBalance(
+                order.user,
+                {
+                  free: baseAssetAmount - fee,
+                  locked: 0,
+                  asset: symbol.baseAsset.name,
+                },
+                {
+                  free: 0,
+                  asset: symbol.quoteAsset.name,
+                  locked: -quoteAssetAmount,
+                },
+              )
+            }
           }),
       )
-      if (!futures) {
-        queries.push(
-          this.updateBalance(
-            order.user,
-            {
-              free: baseAssetAmount - fee,
-              locked: 0,
-              asset: symbol.baseAsset.name,
-            },
-            {
-              free: 0,
-              asset: symbol.quoteAsset.name,
-              locked: -quoteAssetAmount,
-            },
-          ),
-        )
-      }
       this.setOrder(order)
     }
     await Promise.all(queries)
@@ -2021,6 +2093,9 @@ export class OrderService implements OnModuleInit {
         this.unsubscribeRedis(sym)
       }
       this.removeOrder(order)
+      return
+    }
+    if (fillRefused) {
       return
     }
     if (isFilled) {
